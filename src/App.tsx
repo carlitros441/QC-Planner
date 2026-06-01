@@ -236,6 +236,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    setMessage('');
     if (!selectedProtocol) return;
     if (isEm && !form.harvest_day_zero) return setMessage('Select Day 0 Harvest for EM protocols.');
     const included = Object.entries(configs).filter(([, config]) => config.include);
@@ -243,34 +244,38 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
     for (const [test, config] of included) {
       if (!config.assignee_id || !config.start_time || (!config.is_all_day && !config.end_time)) return setMessage(`Complete required fields for ${test}.`);
     }
-    await Promise.all(included.map(async ([testName, config]) => {
-      const schedule: Omit<Schedule, 'id'> = {
-        product_id: form.product_id,
-        product_name: form.product_name,
-        batch_number: form.batch_number,
-        protocol_name: selectedProtocol.name,
-        protocol_type: selectedProtocol.protocol_type,
-        harvest_day_zero: isEm ? form.harvest_day_zero : '',
-        delta_day: isEm ? config.delta_day : null,
-        test_name: testName,
-        workflow_step: config.workflow_step,
-        assignee_id: config.assignee_id,
-        start_time: config.start_time,
-        end_time: config.is_all_day ? '' : config.end_time,
-        is_all_day: config.is_all_day,
-        duration_days: isEm ? 1 : config.is_all_day ? config.duration_days : null,
-        status: 'Scheduled',
-        progress: 0,
-        email_status: 'pending',
-        created_by: currentUserInfo(user)
-      };
-      const id = await saveDoc('schedules', schedule);
-      await addAuditEntry(id, 'CREATE', null, schedule, 'Initial schedule creation', currentUserInfo(user));
-    }));
-    setMessage('Schedules saved. Invite requests are pending.');
-    setForm({ product_id: '', product_name: '', batch_number: '', protocol_name: '', harvest_day_zero: '' });
-    setConfigs({});
-    await refreshSchedules();
+    try {
+      await Promise.all(included.map(async ([testName, config]) => {
+        const schedule: Omit<Schedule, 'id'> = {
+          product_id: form.product_id,
+          product_name: form.product_name,
+          batch_number: form.batch_number,
+          protocol_name: selectedProtocol.name,
+          protocol_type: selectedProtocol.protocol_type,
+          harvest_day_zero: isEm ? form.harvest_day_zero : '',
+          delta_day: isEm ? config.delta_day : null,
+          test_name: testName,
+          workflow_step: config.workflow_step,
+          assignee_id: config.assignee_id,
+          start_time: config.start_time,
+          end_time: config.is_all_day ? '' : config.end_time,
+          is_all_day: config.is_all_day,
+          duration_days: isEm ? 1 : config.is_all_day ? config.duration_days : null,
+          status: 'Scheduled',
+          progress: 0,
+          email_status: 'pending',
+          created_by: currentUserInfo(user)
+        };
+        const id = await saveDoc('schedules', schedule);
+        await addAuditEntry(id, 'CREATE', null, schedule, 'Initial schedule creation', currentUserInfo(user));
+      }));
+      setMessage('Schedules saved. Invite requests are pending.');
+      setForm({ product_id: '', product_name: '', batch_number: '', protocol_name: '', harvest_day_zero: '' });
+      setConfigs({});
+      await refreshSchedules();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to save schedules.');
+    }
   };
 
   return (
@@ -418,8 +423,19 @@ function ProtocolModal({ protocol, products, setProtocol, onSave, onClose }: { p
 
 function PersonnelPage({ personnel, refreshPersonnel }: { personnel: Personnel[]; refreshPersonnel: () => Promise<void> }) {
   const [edit, setEdit] = useState<Draft<Personnel> | null>(null);
-  const save = async () => { if (!edit?.name || !edit.email) return; await saveDoc('personnel', edit, edit.id); await refreshPersonnel(); setEdit(null); };
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Assignments</p><h1>Users / Analysts</h1></div><button onClick={() => setEdit({ name: '', email: '', role: 'Analyst', initials: '', active: true })}>Add Analyst</button></div><div className="tableWrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Initials</th><th>Status</th><th>Actions</th></tr></thead><tbody>{personnel.map(person => <tr key={person.id}><td>{person.name}</td><td>{person.email}</td><td>{person.role}</td><td>{person.initials || initials(person.name)}</td><td>{person.active ? 'Active' : 'Inactive'}</td><td><button onClick={() => setEdit(person)}>Edit</button><button onClick={() => removeDoc('personnel', person.id).then(refreshPersonnel)}>Delete</button></td></tr>)}</tbody></table></div>{edit && <Modal title="Analyst" onClose={() => setEdit(null)}><div className="formGrid"><label>Name<input value={edit.name || ''} onChange={event => setEdit({ ...edit, name: event.target.value })} /></label><label>Email<input type="email" value={edit.email || ''} onChange={event => setEdit({ ...edit, email: event.target.value })} /></label><label>Role<select value={edit.role || 'Analyst'} onChange={event => setEdit({ ...edit, role: event.target.value as Personnel['role'] })}><option>Admin</option><option>Manager</option><option>Supervisor</option><option>QA</option><option>Analyst</option></select></label><label>Initials<input value={edit.initials || ''} onChange={event => setEdit({ ...edit, initials: event.target.value.toUpperCase() })} /></label><label className="checkLine wide"><input type="checkbox" checked={edit.active !== false} onChange={event => setEdit({ ...edit, active: event.target.checked })} />Active</label><button className="primaryButton wide" onClick={save}>Save Analyst</button></div></Modal>}</section>;
+  const [message, setMessage] = useState('');
+  const save = async () => {
+    if (!edit?.name || !edit.email) return;
+    setMessage('');
+    try {
+      await saveDoc('personnel', edit, edit.id);
+      await refreshPersonnel();
+      setEdit(null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to save analyst.');
+    }
+  };
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Assignments</p><h1>Users / Analysts</h1></div><button onClick={() => { setMessage(''); setEdit({ name: '', email: '', role: 'Analyst', initials: '', active: true }); }}>Add Analyst</button></div>{message && <div className="errorBox">{message}</div>}<div className="tableWrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Initials</th><th>Status</th><th>Actions</th></tr></thead><tbody>{personnel.map(person => <tr key={person.id}><td>{person.name}</td><td>{person.email}</td><td>{person.role}</td><td>{person.initials || initials(person.name)}</td><td>{person.active ? 'Active' : 'Inactive'}</td><td><button onClick={() => setEdit(person)}>Edit</button><button onClick={() => removeDoc('personnel', person.id).then(refreshPersonnel)}>Delete</button></td></tr>)}</tbody></table></div>{edit && <Modal title="Analyst" onClose={() => setEdit(null)}><div className="formGrid"><label>Name<input value={edit.name || ''} onChange={event => setEdit({ ...edit, name: event.target.value })} /></label><label>Email<input type="email" value={edit.email || ''} onChange={event => setEdit({ ...edit, email: event.target.value })} /></label><label>Role<select value={edit.role || 'Analyst'} onChange={event => setEdit({ ...edit, role: event.target.value as Personnel['role'] })}><option>Admin</option><option>Manager</option><option>Supervisor</option><option>QA</option><option>Analyst</option></select></label><label>Initials<input value={edit.initials || ''} onChange={event => setEdit({ ...edit, initials: event.target.value.toUpperCase() })} /></label><label className="checkLine wide"><input type="checkbox" checked={edit.active !== false} onChange={event => setEdit({ ...edit, active: event.target.checked })} />Active</label><button className="primaryButton wide" onClick={save}>Save Analyst</button></div></Modal>}</section>;
 }
 
 function AdminSettingsPage({ settings, onSaved }: { settings: AdminSetting; onSaved: (settings: AdminSetting) => void }) {

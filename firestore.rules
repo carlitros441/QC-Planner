@@ -36,18 +36,15 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow read: if signedIn();
-      allow create, update, delete: if isAdmin();
+      allow read, create, update, delete: if signedIn();
     }
 
     match /protocols/{protocolId} {
-      allow read: if signedIn();
-      allow create, update, delete: if isAdmin();
+      allow read, create, update, delete: if signedIn();
     }
 
     match /personnel/{personId} {
-      allow read: if signedIn();
-      allow create, update, delete: if isAdmin();
+      allow read, create, update, delete: if signedIn();
     }
 
     match /adminSettings/general {
