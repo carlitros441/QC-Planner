@@ -39,10 +39,14 @@ const defaultSettings: AdminSetting = {
 const currentUserInfo = (user: User | null) => user?.email || user?.uid || 'unknown';
 const initials = (name?: string) => (name || 'NA').split(/\s+/).map(part => part[0]).join('').toUpperCase().slice(0, 3);
 
-function useCollection<T>(collectionName: string, orderByField?: string, direction: 'asc' | 'desc' = 'asc') {
+function useCollection<T>(collectionName: string, enabled: boolean, orderByField?: string, direction: 'asc' | 'desc' = 'asc') {
   const [items, setItems] = useState<T[]>([]);
   const [loading, setLoading] = useState(false);
   const refresh = async () => {
+    if (!enabled) {
+      setItems([]);
+      return;
+    }
     setLoading(true);
     try {
       setItems(await listDocs<T>(collectionName, orderByField, direction));
@@ -51,15 +55,19 @@ function useCollection<T>(collectionName: string, orderByField?: string, directi
     }
   };
   useEffect(() => {
+    if (!enabled) {
+      setItems([]);
+      return;
+    }
     refresh().catch(console.error);
-  }, [collectionName, orderByField, direction]);
+  }, [collectionName, enabled, orderByField, direction]);
   return { items, setItems, refresh, loading };
 }
 
-function useReferenceData() {
-  const personnel = useCollection<Personnel>('personnel');
-  const products = useCollection<Product>('products');
-  const protocols = useCollection<Protocol>('protocols');
+function useReferenceData(enabled: boolean) {
+  const personnel = useCollection<Personnel>('personnel', enabled);
+  const products = useCollection<Product>('products', enabled);
+  const protocols = useCollection<Protocol>('protocols', enabled);
   return { personnel, products, protocols };
 }
 
@@ -458,8 +466,9 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [tab, setTab] = useState<Tab>('Dashboard');
   const [settings, setSettings] = useState<AdminSetting>(defaultSettings);
-  const { personnel, products, protocols } = useReferenceData();
-  const schedules = useCollection<Schedule>('schedules', 'start_time', 'desc');
+  const dataEnabled = Boolean(user);
+  const { personnel, products, protocols } = useReferenceData(dataEnabled);
+  const schedules = useCollection<Schedule>('schedules', dataEnabled, 'start_time', 'desc');
 
   useEffect(() => {
     if (!auth) return;
