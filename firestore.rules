@@ -50,6 +50,12 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    match /adminSettings/general {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if isAdmin();
+    }
+
     match /adminSettings/{document=**} {
       allow read: if signedIn();
       allow create, update, delete: if isAdmin();

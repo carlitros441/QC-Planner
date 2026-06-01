@@ -11,7 +11,6 @@ import {
   CalendarDays,
   ClipboardList,
   FlaskConical,
-  History,
   LayoutDashboard,
   LogOut,
   Mail,
@@ -28,6 +27,14 @@ type Draft<T> = Partial<T> & { id?: string };
 
 const emptyFilters: Filters = { status: 'All', assignee: 'All', protocol: 'All', product: 'All', batch: 'All' };
 const statusOrder: Status[] = ['Scheduled', 'In Progress', 'Completed', 'Deleted'];
+const defaultSettings: AdminSetting = {
+  id: 'general',
+  organizationName: 'CTMC',
+  website: 'www.CTMC.com',
+  inviteMode: 'draft-only',
+  defaultCalendarLocation: 'QC Laboratory',
+  allowAnalystEdits: false
+};
 
 const currentUserInfo = (user: User | null) => user?.email || user?.uid || 'unknown';
 const initials = (name?: string) => (name || 'NA').split(/\s+/).map(part => part[0]).join('').toUpperCase().slice(0, 3);
@@ -151,7 +158,7 @@ function FiltersBar({ schedules, personnel, filters, setFilters }: { schedules: 
   );
 }
 
-function Dashboard({ schedules, personnel }: { schedules: Schedule[]; personnel: Personnel[] }) {
+function Dashboard({ schedules, personnel, settings }: { schedules: Schedule[]; personnel: Personnel[]; settings: AdminSetting }) {
   const [filters, setFilters] = useState(emptyFilters);
   const filtered = filterSchedules(schedules, filters);
   const dueSoon = filtered.filter(item => item.status !== 'Completed' && item.status !== 'Deleted' && new Date(formatDate(item.start_time)) <= new Date(Date.now() + 7 * 86400000)).length;
@@ -159,7 +166,7 @@ function Dashboard({ schedules, personnel }: { schedules: Schedule[]; personnel:
 
   return (
     <section className="screen">
-      <div className="screenHeader"><div><p className="eyebrow">www.CTMC.com operations</p><h1>Dashboard</h1></div></div>
+      <div className="screenHeader"><div><p className="eyebrow">{settings.website || defaultSettings.website} operations</p><h1>Dashboard</h1></div></div>
       <FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} />
       <div className="metricGrid">
         <Metric icon={<ClipboardList />} label="Visible Tests" value={filtered.length} />
@@ -290,7 +297,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
   );
 }
 
-function Schedules({ schedules, personnel, refreshSchedules, user }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null }) {
+function Schedules({ schedules, personnel, refreshSchedules, user, settings }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null; settings: AdminSetting }) {
   const [filters, setFilters] = useState(emptyFilters);
   const [edit, setEdit] = useState<Schedule | null>(null);
   const [audit, setAudit] = useState<Schedule | null>(null);
@@ -310,7 +317,16 @@ function Schedules({ schedules, personnel, refreshSchedules, user }: { schedules
     await saveSchedule({ ...schedule, status, progress: status === 'Completed' ? 100 : schedule.progress || 0 }, status === 'Deleted' ? 'DELETE_STATUS_RETAINED' : status.toUpperCase());
   };
 
-  const requestInvite = async (schedule: Schedule) => {
+  const handleEmailWorkflow = async (schedule: Schedule) => {
+    if ((settings.inviteMode || 'draft-only') === 'draft-only') {
+      downloadIcs(schedule, personnel, settings);
+      const after = { ...schedule, email_status: 'drafted' as const, updated_by: currentUserInfo(user) };
+      await saveDoc('schedules', after, schedule.id);
+      await addAuditEntry(schedule.id, 'EMAIL_DRAFT_GENERATED', schedule, after, 'User generated .ics invite draft', currentUserInfo(user));
+      await refreshSchedules();
+      return;
+    }
+
     if (!db) return;
     await addDoc(collection(db, 'mailRequests'), { schedule_id: schedule.id, status: 'pending', requested_by: currentUserInfo(user), created_at: new Date().toISOString() });
     await addAuditEntry(schedule.id, 'EMAIL_INVITE_REQUEST', null, { schedule_id: schedule.id, status: 'pending' }, 'User requested email invite workflow', currentUserInfo(user));
@@ -334,7 +350,7 @@ function Schedules({ schedules, personnel, refreshSchedules, user }: { schedules
               <td><progress value={schedule.progress || (schedule.status === 'Completed' ? 100 : 0)} max={100} /></td>
               <td><StatusBadge status={schedule.status} /></td>
               <td><EmailBadge status={schedule.email_status} /></td>
-              <td className="actions"><button onClick={() => setEdit(schedule)}>Edit</button><button onClick={() => setStatus(schedule, 'Completed')}>Complete</button><button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button><button onClick={() => requestInvite(schedule)}>Invite</button><button onClick={() => downloadIcs(schedule, personnel)}>Draft</button><button onClick={() => setAudit(schedule)}>Audit</button></td>
+              <td className="actions"><button onClick={() => setEdit(schedule)}>Edit</button><button onClick={() => setStatus(schedule, 'Completed')}>Complete</button><button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button><button onClick={() => handleEmailWorkflow(schedule)}>{settings.inviteMode === 'apps-script' ? 'Queue Invite' : 'Draft Invite'}</button><button onClick={() => setAudit(schedule)}>Audit</button></td>
             </tr>)}
           </tbody>
         </table>
@@ -398,19 +414,37 @@ function PersonnelPage({ personnel, refreshPersonnel }: { personnel: Personnel[]
   return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Assignments</p><h1>Users / Analysts</h1></div><button onClick={() => setEdit({ name: '', email: '', role: 'Analyst', initials: '', active: true })}>Add Analyst</button></div><div className="tableWrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Initials</th><th>Status</th><th>Actions</th></tr></thead><tbody>{personnel.map(person => <tr key={person.id}><td>{person.name}</td><td>{person.email}</td><td>{person.role}</td><td>{person.initials || initials(person.name)}</td><td>{person.active ? 'Active' : 'Inactive'}</td><td><button onClick={() => setEdit(person)}>Edit</button><button onClick={() => removeDoc('personnel', person.id).then(refreshPersonnel)}>Delete</button></td></tr>)}</tbody></table></div>{edit && <Modal title="Analyst" onClose={() => setEdit(null)}><div className="formGrid"><label>Name<input value={edit.name || ''} onChange={event => setEdit({ ...edit, name: event.target.value })} /></label><label>Email<input type="email" value={edit.email || ''} onChange={event => setEdit({ ...edit, email: event.target.value })} /></label><label>Role<select value={edit.role || 'Analyst'} onChange={event => setEdit({ ...edit, role: event.target.value as Personnel['role'] })}><option>Admin</option><option>Manager</option><option>Supervisor</option><option>QA</option><option>Analyst</option></select></label><label>Initials<input value={edit.initials || ''} onChange={event => setEdit({ ...edit, initials: event.target.value.toUpperCase() })} /></label><label className="checkLine wide"><input type="checkbox" checked={edit.active !== false} onChange={event => setEdit({ ...edit, active: event.target.checked })} />Active</label><button className="primaryButton wide" onClick={save}>Save Analyst</button></div></Modal>}</section>;
 }
 
-function AdminSettingsPage() {
-  const [settings, setSettings] = useState<Draft<AdminSetting>>({ organizationName: 'CTMC', website: 'www.CTMC.com', inviteMode: 'draft-only', defaultCalendarLocation: 'QC Laboratory', allowAnalystEdits: false });
-  useEffect(() => { getOne<AdminSetting>('adminSettings', 'general').then(item => item && setSettings(item)).catch(console.error); }, []);
-  const save = async () => saveDoc('adminSettings', settings, 'general');
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Configuration</p><h1>Admin Settings</h1></div></div><div className="panel formGrid"><label>Organization Name<input value={settings.organizationName || ''} onChange={event => setSettings({ ...settings, organizationName: event.target.value })} /></label><label>Website<input value={settings.website || ''} onChange={event => setSettings({ ...settings, website: event.target.value })} /></label><label>Email Workflow<select value={settings.inviteMode || 'draft-only'} onChange={event => setSettings({ ...settings, inviteMode: event.target.value as AdminSetting['inviteMode'] })}><option value="draft-only">Draft ICS Download</option><option value="apps-script">Apps Script Mail Queue</option></select></label><label>Calendar Location<input value={settings.defaultCalendarLocation || ''} onChange={event => setSettings({ ...settings, defaultCalendarLocation: event.target.value })} /></label><label className="checkLine wide"><input type="checkbox" checked={settings.allowAnalystEdits || false} onChange={event => setSettings({ ...settings, allowAnalystEdits: event.target.checked })} />Allow analyst edits</label><button className="primaryButton wide" onClick={save}>Save Settings</button></div></section>;
+function AdminSettingsPage({ settings, onSaved }: { settings: AdminSetting; onSaved: (settings: AdminSetting) => void }) {
+  const [draft, setDraft] = useState<Draft<AdminSetting>>(settings);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    setDraft(settings);
+  }, [settings]);
+
+  const save = async () => {
+    setMessage('');
+    const payload = { ...defaultSettings, ...draft, id: 'general' };
+    try {
+      await saveDoc('adminSettings', payload, 'general');
+      onSaved(payload);
+      setMessage('Settings saved and applied.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to save settings.');
+    }
+  };
+
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Configuration</p><h1>Admin Settings</h1></div></div><div className="panel formGrid"><label>Organization Name<input value={draft.organizationName || ''} onChange={event => setDraft({ ...draft, organizationName: event.target.value })} /></label><label>Website<input value={draft.website || ''} onChange={event => setDraft({ ...draft, website: event.target.value })} /></label><label>Email Workflow<select value={draft.inviteMode || 'draft-only'} onChange={event => setDraft({ ...draft, inviteMode: event.target.value as AdminSetting['inviteMode'] })}><option value="draft-only">Draft ICS Download</option><option value="apps-script">Apps Script Mail Queue</option></select></label><label>Calendar Location<input value={draft.defaultCalendarLocation || ''} onChange={event => setDraft({ ...draft, defaultCalendarLocation: event.target.value })} /></label><label className="checkLine wide"><input type="checkbox" checked={draft.allowAnalystEdits || false} onChange={event => setDraft({ ...draft, allowAnalystEdits: event.target.checked })} />Allow analyst edits</label><button className="primaryButton wide" onClick={save}>Save Settings</button>{message && <div className="infoBox wide">{message}</div>}</div></section>;
 }
 
-function downloadIcs(schedule: Schedule, personnel: Personnel[]) {
+function downloadIcs(schedule: Schedule, personnel: Personnel[], settings: AdminSetting) {
   const assignee = personnel.find(person => person.id === schedule.assignee_id);
   const start = schedule.is_all_day ? `DTSTART;VALUE=DATE:${formatDate(schedule.start_time).replace(/-/g, '')}` : `DTSTART:${new Date(schedule.start_time).toISOString().replace(/[-:]/g, '').split('.')[0]}Z`;
   const endValue = schedule.is_all_day ? addDays(formatDate(schedule.start_time), schedule.duration_days || 1).replace(/-/g, '') : new Date(schedule.end_time || schedule.start_time).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
   const end = schedule.is_all_day ? `DTEND;VALUE=DATE:${endValue}` : `DTEND:${endValue}`;
-  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//QC Planner//CTMC//EN', 'METHOD:REQUEST', 'BEGIN:VEVENT', `UID:${schedule.id}@qc-planner`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`, start, end, `SUMMARY:${schedule.batch_number} ${schedule.test_name}`, `DESCRIPTION:Product ${schedule.product_name} | Protocol ${schedule.protocol_name}`, 'LOCATION:QC Laboratory', assignee?.email ? `ATTENDEE;CN=${assignee.name}:mailto:${assignee.email}` : '', 'END:VEVENT', 'END:VCALENDAR'].filter(Boolean).join('\r\n');
+  const organization = settings.organizationName || defaultSettings.organizationName;
+  const location = settings.defaultCalendarLocation || defaultSettings.defaultCalendarLocation;
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', `PRODID:-//QC Planner//${organization}//EN`, 'METHOD:REQUEST', 'BEGIN:VEVENT', `UID:${schedule.id}@qc-planner`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`, start, end, `SUMMARY:${schedule.batch_number} ${schedule.test_name}`, `DESCRIPTION:Product ${schedule.product_name} | Protocol ${schedule.protocol_name}`, `LOCATION:${location}`, assignee?.email ? `ATTENDEE;CN=${assignee.name}:mailto:${assignee.email}` : '', 'END:VEVENT', 'END:VCALENDAR'].filter(Boolean).join('\r\n');
   const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
@@ -423,6 +457,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [tab, setTab] = useState<Tab>('Dashboard');
+  const [settings, setSettings] = useState<AdminSetting>(defaultSettings);
   const { personnel, products, protocols } = useReferenceData();
   const schedules = useCollection<Schedule>('schedules', 'start_time', 'desc');
 
@@ -433,6 +468,13 @@ export default function App() {
       setAuthReady(true);
     });
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    getOne<AdminSetting>('adminSettings', 'general')
+      .then(item => setSettings({ ...defaultSettings, ...(item || {}) }))
+      .catch(console.error);
+  }, [user]);
 
   const tabs = useMemo(() => [
     ['Dashboard', LayoutDashboard],
@@ -451,18 +493,18 @@ export default function App() {
   return (
     <div className="appShell">
       <aside>
-        <div className="brand"><strong>QC Planner</strong><span>www.CTMC.com</span></div>
+        <div className="brand"><strong>QC Planner</strong><span>{settings.website || defaultSettings.website}</span></div>
         <nav>{tabs.map(([name, Icon]) => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}><Icon size={18} />{name}</button>)}</nav>
         <button className="signOut" onClick={() => auth && signOut(auth)}><LogOut size={18} />Sign Out</button>
       </aside>
       <main>
-        {tab === 'Dashboard' && <Dashboard schedules={schedules.items} personnel={personnel.items} />}
+        {tab === 'Dashboard' && <Dashboard schedules={schedules.items} personnel={personnel.items} settings={settings} />}
         {tab === 'Create Schedule' && <CreateSchedule products={products.items} protocols={protocols.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
-        {tab === 'Schedules' && <Schedules schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
+        {tab === 'Schedules' && <Schedules schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} settings={settings} />}
         {tab === 'Calendar' && <CalendarView schedules={schedules.items} personnel={personnel.items} />}
         {tab === 'Products & Protocols' && <ProductsProtocols products={products.items} protocols={protocols.items} refreshProducts={products.refresh} refreshProtocols={protocols.refresh} />}
         {tab === 'Personnel' && <PersonnelPage personnel={personnel.items} refreshPersonnel={personnel.refresh} />}
-        {tab === 'Admin Settings' && <AdminSettingsPage />}
+        {tab === 'Admin Settings' && <AdminSettingsPage settings={settings} onSaved={setSettings} />}
       </main>
     </div>
   );
