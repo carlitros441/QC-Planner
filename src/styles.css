@@ -74,6 +74,18 @@ th {
   text-transform: uppercase;
 }
 
+.sortHeader {
+  width: 100%;
+  min-height: 28px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  text-transform: uppercase;
+  font-size: inherit;
+  font-weight: 900;
+}
+
 td small {
   display: block;
   color: var(--muted);
@@ -449,6 +461,38 @@ aside button:hover {
   background: #fbfcfd;
 }
 
+.detailsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.detailsGrid > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.detailsGrid strong {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.detailsGrid input[type="range"] {
+  padding: 0;
+  accent-color: var(--ctmc-red);
+}
+
+.modalActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .auditList span,
 .auditList small {
   display: block;
@@ -528,7 +572,8 @@ progress {
 
   .testConfig,
   .inlineEdit,
-  .subPanel .inlineEdit {
+  .subPanel .inlineEdit,
+  .detailsGrid {
     grid-template-columns: 1fr;
   }
 }
