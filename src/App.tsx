@@ -251,7 +251,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
           product_name: form.product_name,
           batch_number: form.batch_number,
           protocol_name: selectedProtocol.name,
-          protocol_type: selectedProtocol.protocol_type,
+          protocol_type: selectedProtocol.protocol_type || 'QC Sample Plan',
           harvest_day_zero: isEm ? form.harvest_day_zero : '',
           delta_day: isEm ? config.delta_day : null,
           test_name: testName,

@@ -24,6 +24,21 @@ export const toDoc = <T>(snapshot: { id: string; data: () => object }) => ({
   ...snapshot.data()
 }) as T;
 
+function stripUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripUndefined).filter(item => item !== undefined);
+  }
+  if (value && typeof value === 'object') {
+    const source = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(source)
+        .filter(([, entryValue]) => entryValue !== undefined)
+        .map(([key, entryValue]) => [key, stripUndefined(entryValue)])
+    );
+  }
+  return value;
+}
+
 export async function listDocs<T>(collectionName: string, orderByField?: string, direction: 'asc' | 'desc' = 'asc') {
   const database = requireDb();
   const ref = collection(database, collectionName);
@@ -35,7 +50,7 @@ export async function listDocs<T>(collectionName: string, orderByField?: string,
 
 export async function saveDoc<T extends object>(collectionName: string, payload: T, id?: string | null) {
   const database = requireDb();
-  const cleanPayload = { ...payload } as Record<string, unknown>;
+  const cleanPayload = stripUndefined(payload) as Record<string, unknown>;
   delete cleanPayload.id;
   cleanPayload.updated_at = serverTimestamp();
 
