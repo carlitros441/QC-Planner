@@ -1,0 +1,534 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ctmc-red: #b11226;
+  --ctmc-red-dark: #841627;
+  --ink: #263238;
+  --muted: #64707a;
+  --line: #d8dee4;
+  --panel: #ffffff;
+  --bg: #f5f7f9;
+  --blue: #2463eb;
+  --green: #14804a;
+  --amber: #b7791f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+}
+
+input,
+select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: white;
+  color: var(--ink);
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 13px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: #eef1f4;
+  color: var(--ink);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+td small {
+  display: block;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.appShell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+}
+
+aside {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 20px 16px;
+  background: #263238;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+aside nav {
+  display: grid;
+  gap: 6px;
+}
+
+aside button {
+  min-height: 42px;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  color: #dce4ea;
+  text-align: left;
+  font-weight: 700;
+}
+
+aside button.active,
+aside button:hover {
+  background: var(--ctmc-red);
+  color: white;
+}
+
+.brand {
+  display: grid;
+  gap: 4px;
+  padding: 10px 8px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.brand strong {
+  font-size: 1.35rem;
+}
+
+.brand span,
+.eyebrow {
+  color: var(--ctmc-red);
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  font-size: 0.76rem;
+}
+
+.signOut {
+  margin-top: auto;
+}
+
+.appShell > main {
+  min-width: 0;
+  padding: 28px;
+}
+
+.screen {
+  display: grid;
+  gap: 18px;
+}
+
+.screenHeader {
+  min-height: 52px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+}
+
+.screenHeader h1 {
+  margin: 2px 0 0;
+  font-size: 2rem;
+}
+
+.panel,
+.metricCard,
+.authCard,
+.calendarPanel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--ctmc-red);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(35, 45, 55, 0.07);
+}
+
+.panel {
+  padding: 18px;
+}
+
+.panel h2,
+.panel h3 {
+  margin: 0 0 12px;
+}
+
+.panelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panelHeader button,
+.screenHeader button,
+.actions button,
+.recordRow button,
+.ghostButton {
+  min-height: 34px;
+  border-radius: 6px;
+  padding: 7px 10px;
+  background: #eef1f4;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.primaryButton {
+  min-height: 44px;
+  border-radius: 6px;
+  padding: 10px 16px;
+  background: var(--ctmc-red);
+  color: white;
+  font-weight: 900;
+}
+
+.primaryButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.metricCard {
+  padding: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.metricCard span {
+  color: var(--ctmc-red);
+}
+
+.metricCard p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.metricCard strong {
+  font-size: 2rem;
+}
+
+.twoColumn {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.filtersBar,
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(145px, 1fr));
+  gap: 12px;
+}
+
+.filtersBar {
+  padding: 14px;
+  background: #eef1f4;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.formGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.badge,
+.mailBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.status-scheduled {
+  background: var(--blue);
+}
+
+.status-in-progress {
+  background: var(--amber);
+}
+
+.status-completed {
+  background: var(--green);
+}
+
+.status-deleted {
+  background: var(--muted);
+}
+
+.mailBadge {
+  background: #475569;
+}
+
+.mail-sent {
+  background: var(--green);
+}
+
+.mail-failed {
+  background: var(--ctmc-red);
+}
+
+.mail-pending,
+.mail-processing {
+  background: var(--amber);
+}
+
+.actions {
+  min-width: 280px;
+}
+
+.actions button {
+  margin: 0 4px 6px 0;
+}
+
+.testConfig,
+.inlineEdit {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 110px 145px 110px;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  background: #fbfcfd;
+}
+
+.checkLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.checkLine input {
+  width: auto;
+  min-height: auto;
+}
+
+.recordRow,
+.compactList > div,
+.barRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  background: #fbfcfd;
+}
+
+.recordRow > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.recordRow span,
+.recordRow small {
+  color: var(--muted);
+}
+
+.subPanel {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.subPanel .inlineEdit {
+  grid-template-columns: 1fr 140px auto;
+  background: white;
+}
+
+.calendarPanel {
+  padding: 16px;
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(18, 29, 38, 0.58);
+}
+
+.modalPanel {
+  width: min(880px, 100%);
+  max-height: 88vh;
+  overflow: auto;
+  padding: 18px;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.modalHeader h2 {
+  margin: 0;
+}
+
+.auditList {
+  display: grid;
+  gap: 10px;
+}
+
+.auditList > div {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.auditList span,
+.auditList small {
+  display: block;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.authPage,
+.loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.authCard {
+  width: min(430px, 100%);
+  padding: 24px;
+  display: grid;
+  gap: 14px;
+}
+
+.authCard h1,
+.authCard p {
+  margin: 0;
+}
+
+.brandMark {
+  color: var(--ctmc-red);
+  font-weight: 900;
+}
+
+.errorBox,
+.infoBox {
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-weight: 800;
+}
+
+.errorBox {
+  background: #fff0f1;
+  border: 1px solid #ffcdd2;
+  color: var(--ctmc-red-dark);
+}
+
+.infoBox {
+  background: #edf7ff;
+  border: 1px solid #badfff;
+  color: #0b4a7a;
+}
+
+progress {
+  width: 96px;
+  accent-color: var(--ctmc-red);
+}
+
+@media (max-width: 980px) {
+  .appShell {
+    grid-template-columns: 1fr;
+  }
+
+  aside {
+    position: static;
+    height: auto;
+  }
+
+  aside nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metricGrid,
+  .twoColumn,
+  .filtersBar,
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .testConfig,
+  .inlineEdit,
+  .subPanel .inlineEdit {
+    grid-template-columns: 1fr;
+  }
+}

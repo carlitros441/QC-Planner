@@ -1,0 +1,58 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/adminSettings/users/records/$(request.auth.uid))
+        && get(/databases/$(database)/documents/adminSettings/users/records/$(request.auth.uid)).data.role in ['Admin', 'Manager'];
+    }
+
+    match /schedules/{scheduleId} {
+      allow read, create, update: if signedIn();
+      allow delete: if false;
+
+      match /auditTrail/{auditId} {
+        allow read, create: if signedIn();
+        allow update, delete: if false;
+      }
+    }
+
+    match /auditTrail/{auditId} {
+      allow read, create: if signedIn();
+      allow update, delete: if false;
+    }
+
+    match /mailRequests/{mailRequestId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.schedule_id is string
+        && request.resource.data.status == 'pending';
+      allow update, delete: if false;
+    }
+
+    match /products/{productId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /protocols/{protocolId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /personnel/{personId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /adminSettings/{document=**} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}
