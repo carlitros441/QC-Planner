@@ -68,10 +68,15 @@ td {
 }
 
 th {
+  position: relative;
   background: #eef1f4;
   color: var(--ink);
   font-size: 0.78rem;
   text-transform: uppercase;
+}
+
+.resizableHeader {
+  min-width: 90px;
 }
 
 .sortHeader {
@@ -84,6 +89,15 @@ th {
   text-transform: uppercase;
   font-size: inherit;
   font-weight: 900;
+}
+
+.columnResizeHandle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
 }
 
 td small {
@@ -317,6 +331,10 @@ aside button:hover {
   background: var(--amber);
 }
 
+.status-pending-review {
+  background: #7c3aed;
+}
+
 .status-completed {
   background: var(--green);
 }
@@ -350,10 +368,45 @@ aside button:hover {
   margin: 0 4px 6px 0;
 }
 
+.progressStack {
+  position: relative;
+  display: flex;
+  width: 140px;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e4e9ee;
+  box-shadow: inset 0 0 0 1px rgba(38, 50, 56, 0.12);
+}
+
+.progressStack span {
+  display: block;
+  height: 100%;
+}
+
+.progressExecution {
+  background: var(--ctmc-red);
+}
+
+.progressReview {
+  background: #10b981;
+}
+
+.progressStack em {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #1f2933;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
 .testConfig,
 .inlineEdit {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr 110px 145px 110px;
+  grid-template-columns: 1.3fr 1fr 1fr 1fr 110px 145px 110px;
   gap: 10px;
   align-items: center;
   padding: 12px;

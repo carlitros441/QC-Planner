@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -26,7 +26,7 @@ type Tab = 'Dashboard' | 'Create Schedule' | 'Schedules' | 'Calendar' | 'Product
 type Draft<T> = Partial<T> & { id?: string };
 
 const emptyFilters: Filters = { status: 'All', assignee: 'All', protocol: 'All', product: 'All', batch: 'All' };
-const statusOrder: Status[] = ['Scheduled', 'In Progress', 'Completed', 'Deleted'];
+const statusOrder: Status[] = ['Scheduled', 'In Progress', 'Pending Review', 'Completed', 'Deleted'];
 const defaultSettings: AdminSetting = {
   id: 'general',
   organizationName: 'CTMC',
@@ -38,6 +38,11 @@ const defaultSettings: AdminSetting = {
 
 const currentUserInfo = (user: User | null) => user?.email || user?.uid || 'unknown';
 const initials = (name?: string) => (name || 'NA').split(/\s+/).map(part => part[0]).join('').toUpperCase().slice(0, 3);
+const effectiveProgress = (schedule: Schedule) => {
+  if (schedule.status === 'Completed' || schedule.review_status === 'Completed') return 100;
+  if (schedule.status === 'Pending Review' || schedule.review_status === 'Pending Review') return 80;
+  return Math.min(Number(schedule.progress || 0), 80);
+};
 
 function useCollection<T>(collectionName: string, enabled: boolean, orderByField?: string, direction: 'asc' | 'desc' = 'asc') {
   const [items, setItems] = useState<T[]>([]);
@@ -91,6 +96,18 @@ function StatusBadge({ status }: { status?: Status }) {
 
 function EmailBadge({ status }: { status?: string }) {
   return <span className={`mailBadge mail-${status || 'pending'}`}>{status || 'pending'}</span>;
+}
+
+function ProgressBar({ schedule }: { schedule: Schedule }) {
+  const execution = Math.min(effectiveProgress(schedule), 80);
+  const review = schedule.review_status === 'Completed' || schedule.status === 'Completed' ? 20 : 0;
+  return (
+    <div className="progressStack" title={`${execution + review}% complete`}>
+      <span className="progressExecution" style={{ width: `${execution}%` }} />
+      <span className="progressReview" style={{ width: `${review}%` }} />
+      <em>{execution + review}%</em>
+    </div>
+  );
 }
 
 function ConfigRequired() {
@@ -207,7 +224,7 @@ function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; 
 
 function CreateSchedule({ products, protocols, personnel, refreshSchedules, user }: { products: Product[]; protocols: Protocol[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null }) {
   const [form, setForm] = useState({ product_id: '', product_name: '', batch_number: '', protocol_name: '', harvest_day_zero: '' });
-  const [configs, setConfigs] = useState<Record<string, { include: boolean; assignee_id: string; is_all_day: boolean; start_time: string; end_time: string; duration_days: number; delta_day: number; workflow_step: string }>>({});
+  const [configs, setConfigs] = useState<Record<string, { include: boolean; assignee_id: string; reviewer_id: string; is_all_day: boolean; start_time: string; end_time: string; duration_days: number; delta_day: number; workflow_step: string }>>({});
   const [message, setMessage] = useState('');
   const selectedProduct = products.find(product => product.id === form.product_id);
   const options = protocols.filter(protocol => protocol.product_id === form.product_id || protocol.product_name === selectedProduct?.name);
@@ -225,7 +242,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
     setForm({ ...form, protocol_name: protocolName });
     const tests = protocol?.protocol_type === 'EM Protocol' && protocol.em_tests?.length ? protocol.em_tests.map(item => item.name) : protocol?.tests || [];
     const deltaByName = (protocol?.em_tests || []).reduce<Record<string, number>>((acc, item) => ({ ...acc, [item.name]: Number(item.delta_day || 0) }), {});
-    setConfigs(Object.fromEntries(tests.map(test => [test, { include: protocol?.protocol_type === 'EM Protocol', assignee_id: '', is_all_day: true, start_time: '', end_time: '', duration_days: 1, delta_day: deltaByName[test] || 0, workflow_step: protocol?.workflow_steps?.[0]?.name || '' }])));
+    setConfigs(Object.fromEntries(tests.map(test => [test, { include: protocol?.protocol_type === 'EM Protocol', assignee_id: '', reviewer_id: '', is_all_day: true, start_time: '', end_time: '', duration_days: 1, delta_day: deltaByName[test] || 0, workflow_step: protocol?.workflow_steps?.[0]?.name || '' }])));
   };
 
   const updateHarvest = (value: string) => {
@@ -242,7 +259,8 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
     const included = Object.entries(configs).filter(([, config]) => config.include);
     if (!included.length) return setMessage('Select at least one test.');
     for (const [test, config] of included) {
-      if (!config.assignee_id || !config.start_time || (!config.is_all_day && !config.end_time)) return setMessage(`Complete required fields for ${test}.`);
+      if (!config.assignee_id || !config.reviewer_id || !config.start_time || (!config.is_all_day && !config.end_time)) return setMessage(`Complete analyst, reviewer, and date fields for ${test}.`);
+      if (config.assignee_id === config.reviewer_id) return setMessage(`Reviewer must be different from analyst for ${test}.`);
     }
     try {
       await Promise.all(included.map(async ([testName, config]) => {
@@ -257,12 +275,14 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
           test_name: testName,
           workflow_step: config.workflow_step,
           assignee_id: config.assignee_id,
+          reviewer_id: config.reviewer_id,
           start_time: config.start_time,
           end_time: config.is_all_day ? '' : config.end_time,
           is_all_day: config.is_all_day,
           duration_days: isEm ? 1 : config.is_all_day ? config.duration_days : null,
           status: 'Scheduled',
           progress: 0,
+          review_status: 'Not Ready',
           email_status: 'pending',
           created_by: currentUserInfo(user)
         };
@@ -290,7 +310,8 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
           {Object.entries(configs).map(([testName, config]) => (
             <div className="testConfig" key={testName}>
               <label className="checkLine"><input type="checkbox" disabled={isEm} checked={config.include} onChange={event => setConfigs({ ...configs, [testName]: { ...config, include: event.target.checked } })} />{testName}</label>
-              <select disabled={!config.include} required={config.include} value={config.assignee_id} onChange={event => setConfigs({ ...configs, [testName]: { ...config, assignee_id: event.target.value } })}><option value="">Assignee</option>{personnel.filter(person => person.active !== false).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
+              <select disabled={!config.include} required={config.include} value={config.assignee_id} onChange={event => setConfigs({ ...configs, [testName]: { ...config, assignee_id: event.target.value } })}><option value="">Analyst</option>{personnel.filter(person => person.active !== false).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
+              <select disabled={!config.include} required={config.include} value={config.reviewer_id} onChange={event => setConfigs({ ...configs, [testName]: { ...config, reviewer_id: event.target.value } })}><option value="">QC Reviewer</option>{personnel.filter(person => person.active !== false && person.id !== config.assignee_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
               <select disabled={!config.include} value={config.workflow_step} onChange={event => setConfigs({ ...configs, [testName]: { ...config, workflow_step: event.target.value } })}><option value="">Workflow step</option>{selectedProtocol?.workflow_steps?.map(step => <option key={step.id}>{step.name}</option>)}</select>
               {isEm ? <>
                 <input type="number" step="1" value={config.delta_day} onChange={event => setConfigs({ ...configs, [testName]: { ...config, delta_day: Number(event.target.value || 0), start_time: addDays(form.harvest_day_zero, Number(event.target.value || 0)) } })} />
@@ -315,10 +336,24 @@ function Schedules({ schedules, personnel, refreshSchedules, user, settings }: {
   const [edit, setEdit] = useState<Schedule | null>(null);
   const [audit, setAudit] = useState<Schedule | null>(null);
   const [sort, setSort] = useState<{ field: string; direction: 'asc' | 'desc' }>({ field: 'start_time', direction: 'asc' });
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
+    test_name: 220,
+    product: 180,
+    batch_number: 145,
+    assignee: 170,
+    reviewer: 170,
+    start_time: 135,
+    progress: 170,
+    status: 145,
+    email_status: 120,
+    actions: 320
+  });
   const getAssigneeName = (assigneeId: string) => personnel.find(person => person.id === assigneeId)?.name || 'Unassigned';
+  const getReviewerName = (reviewerId?: string) => personnel.find(person => person.id === reviewerId)?.name || 'Unassigned';
   const toggleSort = (field: string) => setSort(current => current.field === field ? { field, direction: current.direction === 'asc' ? 'desc' : 'asc' } : { field, direction: 'asc' });
   const sortValue = (schedule: Schedule, field: string) => {
     if (field === 'assignee') return getAssigneeName(schedule.assignee_id);
+    if (field === 'reviewer') return getReviewerName(schedule.reviewer_id);
     if (field === 'product') return schedule.product_name || schedule.product_id;
     if (field === 'progress') return schedule.progress || (schedule.status === 'Completed' ? 100 : 0);
     return String((schedule as unknown as Record<string, unknown>)[field] || '');
@@ -329,7 +364,28 @@ function Schedules({ schedules, personnel, refreshSchedules, user, settings }: {
     if (typeof left === 'number' && typeof right === 'number') return sort.direction === 'asc' ? left - right : right - left;
     return sort.direction === 'asc' ? String(left).localeCompare(String(right)) : String(right).localeCompare(String(left));
   });
-  const sortLabel = (field: string) => sort.field === field ? (sort.direction === 'asc' ? ' ↑' : ' ↓') : '';
+  const sortLabel = (field: string) => sort.field === field ? (sort.direction === 'asc' ? ' ^' : ' v') : '';
+  const startColumnResize = (field: string, event: ReactMouseEvent<HTMLSpanElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = columnWidths[field] || 140;
+    const move = (moveEvent: globalThis.MouseEvent) => {
+      const width = Math.max(90, startWidth + moveEvent.clientX - startX);
+      setColumnWidths(current => ({ ...current, [field]: width }));
+    };
+    const stop = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', stop);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', stop);
+  };
+  const sortableHeader = (field: string, label: string) => (
+    <th className="resizableHeader">
+      <button className="sortHeader" onClick={() => toggleSort(field)}>{label}{sortLabel(field)}</button>
+      <span className="columnResizeHandle" onMouseDown={event => startColumnResize(field, event)} />
+    </th>
+  );
 
   const saveSchedule = async (schedule: Schedule, action: string) => {
     const reason = window.prompt('Reason for this GMP audit trail entry:', action);
@@ -343,6 +399,12 @@ function Schedules({ schedules, personnel, refreshSchedules, user, settings }: {
 
   const setStatus = async (schedule: Schedule, status: Status) => {
     await saveSchedule({ ...schedule, status, progress: status === 'Completed' ? 100 : schedule.progress || 0 }, status === 'Deleted' ? 'DELETE_STATUS_RETAINED' : status.toUpperCase());
+  };
+  const completeTest = async (schedule: Schedule) => {
+    await saveSchedule({ ...schedule, status: 'Pending Review', progress: 80, review_status: 'Pending Review', test_completed_at: new Date().toISOString() }, 'TEST_COMPLETE');
+  };
+  const completeReview = async (schedule: Schedule) => {
+    await saveSchedule({ ...schedule, status: 'Completed', progress: 100, review_status: 'Completed', review_completed_at: new Date().toISOString() }, 'REVIEW_COMPLETE');
   };
 
   const handleEmailWorkflow = async (schedule: Schedule) => {
@@ -367,18 +429,22 @@ function Schedules({ schedules, personnel, refreshSchedules, user, settings }: {
       <FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} />
       <div className="tableWrap">
         <table>
-          <thead><tr><th><button className="sortHeader" onClick={() => toggleSort('test_name')}>Test{sortLabel('test_name')}</button></th><th><button className="sortHeader" onClick={() => toggleSort('product')}>Product{sortLabel('product')}</button></th><th><button className="sortHeader" onClick={() => toggleSort('batch_number')}>Batch{sortLabel('batch_number')}</button></th><th><button className="sortHeader" onClick={() => toggleSort('assignee')}>Assignee{sortLabel('assignee')}</button></th><th><button className="sortHeader" onClick={() => toggleSort('start_time')}>Date{sortLabel('start_time')}</button></th><th><button className="sortHeader" onClick={() => toggleSort('progress')}>Progress{sortLabel('progress')}</button></th><th><button className="sortHeader" onClick={() => toggleSort('status')}>Status{sortLabel('status')}</button></th><th><button className="sortHeader" onClick={() => toggleSort('email_status')}>Email{sortLabel('email_status')}</button></th><th>Actions</th></tr></thead>
+          <colgroup>
+            {['test_name', 'product', 'batch_number', 'assignee', 'reviewer', 'start_time', 'progress', 'status', 'email_status', 'actions'].map(field => <col key={field} style={{ width: `${columnWidths[field]}px` }} />)}
+          </colgroup>
+          <thead><tr>{sortableHeader('test_name', 'Test')}{sortableHeader('product', 'Product')}{sortableHeader('batch_number', 'Batch')}{sortableHeader('assignee', 'Analyst')}{sortableHeader('reviewer', 'QC Reviewer')}{sortableHeader('start_time', 'Date')}{sortableHeader('progress', 'Progress')}{sortableHeader('status', 'Status')}{sortableHeader('email_status', 'Email')}<th>Actions</th></tr></thead>
           <tbody>
             {filtered.map(schedule => <tr key={schedule.id}>
               <td><strong>{schedule.test_name}</strong><small>{schedule.workflow_step || schedule.protocol_name}</small></td>
               <td>{schedule.product_name || schedule.product_id}</td>
               <td>{schedule.batch_number}</td>
               <td>{getAssigneeName(schedule.assignee_id)}</td>
+              <td>{getReviewerName(schedule.reviewer_id)}<small>{schedule.review_status || 'Not Ready'}</small></td>
               <td>{formatDate(schedule.start_time)}</td>
-              <td><progress value={schedule.progress || (schedule.status === 'Completed' ? 100 : 0)} max={100} /></td>
+              <td><ProgressBar schedule={schedule} /></td>
               <td><StatusBadge status={schedule.status} /></td>
               <td><EmailBadge status={schedule.email_status} /></td>
-              <td className="actions"><button onClick={() => setEdit(schedule)}>Edit</button><button onClick={() => setStatus(schedule, 'Completed')}>Complete</button><button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button><button onClick={() => handleEmailWorkflow(schedule)}>{settings.inviteMode === 'apps-script' ? 'Queue Invite' : 'Draft Invite'}</button><button onClick={() => setAudit(schedule)}>Audit</button></td>
+              <td className="actions"><button onClick={() => setEdit(schedule)}>Edit</button>{schedule.status !== 'Completed' && schedule.status !== 'Pending Review' && <button onClick={() => completeTest(schedule)}>Test Complete</button>}{schedule.status === 'Pending Review' && <button onClick={() => completeReview(schedule)}>Review Complete</button>}<button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button><button onClick={() => handleEmailWorkflow(schedule)}>{settings.inviteMode === 'apps-script' ? 'Queue Invite' : 'Draft Invite'}</button><button onClick={() => setAudit(schedule)}>Audit</button></td>
             </tr>)}
           </tbody>
         </table>
@@ -390,7 +456,7 @@ function Schedules({ schedules, personnel, refreshSchedules, user, settings }: {
 }
 
 function ScheduleEditor({ schedule, personnel, setSchedule, onSave }: { schedule: Schedule; personnel: Personnel[]; setSchedule: (schedule: Schedule) => void; onSave: (schedule: Schedule) => void }) {
-  return <div className="formGrid"><label>Test Name<input value={schedule.test_name} onChange={event => setSchedule({ ...schedule, test_name: event.target.value })} /></label><label>Assignee<select value={schedule.assignee_id} onChange={event => setSchedule({ ...schedule, assignee_id: event.target.value })}>{personnel.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label><label>Start<input type={schedule.is_all_day ? 'date' : 'datetime-local'} value={schedule.start_time} onChange={event => setSchedule({ ...schedule, start_time: event.target.value })} /></label><label>Progress<input type="number" min={0} max={100} value={schedule.progress || 0} onChange={event => setSchedule({ ...schedule, progress: Number(event.target.value) })} /></label><button className="primaryButton wide" onClick={() => onSave(schedule)}>Save Schedule</button></div>;
+  return <div className="formGrid"><label>Test Name<input value={schedule.test_name} onChange={event => setSchedule({ ...schedule, test_name: event.target.value })} /></label><label>Analyst<select value={schedule.assignee_id} onChange={event => setSchedule({ ...schedule, assignee_id: event.target.value, reviewer_id: schedule.reviewer_id === event.target.value ? '' : schedule.reviewer_id })}>{personnel.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label><label>QC Reviewer<select value={schedule.reviewer_id || ''} onChange={event => setSchedule({ ...schedule, reviewer_id: event.target.value })}><option value="">Select reviewer</option>{personnel.filter(person => person.id !== schedule.assignee_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label><label>Start<input type={schedule.is_all_day ? 'date' : 'datetime-local'} value={schedule.start_time} onChange={event => setSchedule({ ...schedule, start_time: event.target.value })} /></label><label>Execution Progress<input type="number" min={0} max={80} value={Math.min(schedule.progress || 0, 80)} onChange={event => setSchedule({ ...schedule, progress: Number(event.target.value) })} /></label><button className="primaryButton wide" onClick={() => onSave(schedule)}>Save Schedule</button></div>;
 }
 
 function AuditModal({ schedule, onClose }: { schedule: Schedule; onClose: () => void }) {
@@ -419,19 +485,27 @@ function CalendarView({ schedules, personnel, refreshSchedules, user }: { schedu
   };
   const markComplete = async () => {
     if (!selected) return;
-    const reason = window.prompt('Reason for marking this assay complete:', 'Testing completed');
+    const reason = window.prompt('Reason for marking this test execution complete:', 'Testing completed');
     if (reason === null) return;
-    const completed = { ...selected, status: 'Completed' as Status, progress: 100, completed_by: currentUserInfo(user) };
-    await saveCalendarSchedule(completed, 'COMPLETE', reason);
+    const completed = { ...selected, status: 'Pending Review' as Status, progress: 80, review_status: 'Pending Review' as const, test_completed_at: new Date().toISOString(), completed_by: currentUserInfo(user) };
+    await saveCalendarSchedule(completed, 'TEST_COMPLETE', reason);
+  };
+  const markReviewComplete = async () => {
+    if (!selected) return;
+    const reason = window.prompt('Reason for marking review complete:', 'QC review completed');
+    if (reason === null) return;
+    const completed = { ...selected, status: 'Completed' as Status, progress: 100, review_status: 'Completed' as const, review_completed_at: new Date().toISOString(), completed_by: currentUserInfo(user) };
+    await saveCalendarSchedule(completed, 'REVIEW_COMPLETE', reason);
   };
   const saveProgress = async () => {
     if (!selected) return;
     const reason = window.prompt('Reason for updating progress:', 'Progress update');
     if (reason === null) return;
-    const nextStatus: Status = (selected.progress || 0) >= 100 ? 'Completed' : ((selected.progress || 0) > 0 ? 'In Progress' : 'Scheduled');
-    await saveCalendarSchedule({ ...selected, status: nextStatus }, 'PROGRESS_UPDATE', reason);
+    const executionProgress = Math.min(selected.progress || 0, 80);
+    const nextStatus: Status = executionProgress > 0 ? 'In Progress' : 'Scheduled';
+    await saveCalendarSchedule({ ...selected, progress: executionProgress, status: nextStatus }, 'PROGRESS_UPDATE', reason);
   };
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Calendar control</p><h1>QC Schedule Calendar</h1></div><select value={view} onChange={event => setView(event.target.value)}><option value="dayGridMonth">Month</option><option value="timeGridWeek">Week</option><option value="timeGridDay">Day</option><option value="listWeek">List</option></select></div><FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} /><div className="calendarPanel"><FullCalendar plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]} initialView={view} key={view} events={events} height="auto" headerToolbar={{ left: 'prev,next today', center: 'title', right: '' }} eventClick={info => setSelected(filtered.find(schedule => schedule.id === info.event.id) || null)} /></div>{selected && <Modal title="Scheduled Assay Details" onClose={() => setSelected(null)}><div className="detailsGrid"><div><strong>Test</strong><span>{selected.test_name}</span></div><div><strong>Batch</strong><span>{selected.batch_number}</span></div><div><strong>Product</strong><span>{selected.product_name || selected.product_id}</span></div><div><strong>Protocol</strong><span>{selected.protocol_name}</span></div><div><strong>Assignee</strong><span>{personnel.find(person => person.id === selected.assignee_id)?.name || 'Unassigned'}</span></div><div><strong>Date</strong><span>{formatDate(selected.start_time)}</span></div><div><strong>Status</strong><StatusBadge status={selected.status} /></div><label className="wide">Progress: {selected.progress || (selected.status === 'Completed' ? 100 : 0)}%<input type="range" min={0} max={100} step={5} value={selected.progress || (selected.status === 'Completed' ? 100 : 0)} onChange={event => setSelected({ ...selected, progress: Number(event.target.value) })} /></label><div className="wide modalActions"><button className="primaryButton" onClick={saveProgress}>Save Progress</button><button className="primaryButton" onClick={markComplete}>Mark Complete</button></div></div></Modal>}</section>;
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Calendar control</p><h1>QC Schedule Calendar</h1></div><select value={view} onChange={event => setView(event.target.value)}><option value="dayGridMonth">Month</option><option value="timeGridWeek">Week</option><option value="timeGridDay">Day</option><option value="listWeek">List</option></select></div><FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} /><div className="calendarPanel"><FullCalendar plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]} initialView={view} key={view} events={events} height="auto" headerToolbar={{ left: 'prev,next today', center: 'title', right: '' }} eventClick={info => setSelected(filtered.find(schedule => schedule.id === info.event.id) || null)} /></div>{selected && <Modal title="Scheduled Assay Details" onClose={() => setSelected(null)}><div className="detailsGrid"><div><strong>Test</strong><span>{selected.test_name}</span></div><div><strong>Batch</strong><span>{selected.batch_number}</span></div><div><strong>Product</strong><span>{selected.product_name || selected.product_id}</span></div><div><strong>Protocol</strong><span>{selected.protocol_name}</span></div><div><strong>Analyst</strong><span>{personnel.find(person => person.id === selected.assignee_id)?.name || 'Unassigned'}</span></div><div><strong>QC Reviewer</strong><span>{personnel.find(person => person.id === selected.reviewer_id)?.name || 'Unassigned'}</span></div><div><strong>Date</strong><span>{formatDate(selected.start_time)}</span></div><div><strong>Status</strong><StatusBadge status={selected.status} /></div><div className="wide"><strong>Progress</strong><ProgressBar schedule={selected} /></div><label className="wide">Execution Progress: {Math.min(selected.progress || 0, 80)}%<input type="range" min={0} max={80} step={5} value={Math.min(selected.progress || 0, 80)} onChange={event => setSelected({ ...selected, progress: Number(event.target.value) })} /></label><div className="wide modalActions"><button className="primaryButton" onClick={saveProgress}>Save Progress</button><button className="primaryButton" onClick={markComplete}>Test Complete</button><button className="primaryButton" onClick={markReviewComplete}>Review Complete</button></div></div></Modal>}</section>;
 }
 
 function ProductsProtocols({ products, protocols, refreshProducts, refreshProtocols }: { products: Product[]; protocols: Protocol[]; refreshProducts: () => Promise<void>; refreshProtocols: () => Promise<void> }) {
@@ -532,6 +606,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [tab, setTab] = useState<Tab>('Dashboard');
   const [settings, setSettings] = useState<AdminSetting>(defaultSettings);
+  const [handledActionLink, setHandledActionLink] = useState(false);
   const dataEnabled = Boolean(user);
   const { personnel, products, protocols } = useReferenceData(dataEnabled);
   const schedules = useCollection<Schedule>('schedules', dataEnabled, 'start_time', 'desc');
@@ -550,6 +625,28 @@ export default function App() {
       .then(item => setSettings({ ...defaultSettings, ...(item || {}) }))
       .catch(console.error);
   }, [user]);
+
+  useEffect(() => {
+    if (!user || handledActionLink) return;
+    const params = new URLSearchParams(window.location.search);
+    const scheduleId = params.get('schedule') || params.get('scheduleId');
+    const action = params.get('action');
+    if (!scheduleId || !['test-complete', 'review-complete'].includes(action || '')) return;
+    setHandledActionLink(true);
+    getOne<Schedule>('schedules', scheduleId)
+      .then(async schedule => {
+        if (!schedule) throw new Error('Schedule was not found.');
+        const after = action === 'test-complete'
+          ? { ...schedule, status: 'Pending Review' as Status, progress: 80, review_status: 'Pending Review' as const, test_completed_at: new Date().toISOString(), completed_by: currentUserInfo(user) }
+          : { ...schedule, status: 'Completed' as Status, progress: 100, review_status: 'Completed' as const, review_completed_at: new Date().toISOString(), completed_by: currentUserInfo(user) };
+        await saveDoc('schedules', after, scheduleId);
+        await addAuditEntry(scheduleId, action === 'test-complete' ? 'TEST_COMPLETE_EMAIL_LINK' : 'REVIEW_COMPLETE_EMAIL_LINK', schedule, after, 'Completed from email action link', currentUserInfo(user));
+        await schedules.refresh();
+        setTab('Schedules');
+        window.history.replaceState({}, document.title, window.location.pathname);
+      })
+      .catch(error => window.alert(error instanceof Error ? error.message : 'Unable to apply email action link.'));
+  }, [user, handledActionLink]);
 
   const tabs = useMemo(() => [
     ['Dashboard', LayoutDashboard],

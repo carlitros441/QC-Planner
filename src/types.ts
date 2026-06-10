@@ -1,4 +1,4 @@
-export type Status = 'Scheduled' | 'In Progress' | 'Completed' | 'Deleted';
+export type Status = 'Scheduled' | 'In Progress' | 'Pending Review' | 'Completed' | 'Deleted';
 export type ProtocolType = 'QC Sample Plan' | 'EM Protocol';
 export type Role = 'Admin' | 'Manager' | 'Supervisor' | 'QA' | 'Analyst';
 
@@ -59,12 +59,16 @@ export interface Schedule extends BaseDoc {
   test_name: string;
   workflow_step?: string;
   assignee_id: string;
+  reviewer_id?: string;
   start_time: string;
   end_time?: string;
   is_all_day: boolean;
   duration_days?: number | null;
   status: Status;
   progress?: number;
+  review_status?: 'Not Ready' | 'Pending Review' | 'Completed';
+  test_completed_at?: unknown;
+  review_completed_at?: unknown;
   email_status?: 'pending' | 'processing' | 'sent' | 'failed' | 'drafted';
   email_error?: string | null;
   created_by?: string;
