@@ -18,6 +18,7 @@ export interface Product extends BaseDoc {
 export interface EmTest {
   name: string;
   delta_day: number;
+  qc_sample_id?: string;
 }
 
 export interface WorkflowStep {
@@ -36,6 +37,7 @@ export interface Protocol extends BaseDoc {
   product_name: string;
   product_type?: string;
   tests: string[];
+  test_sample_ids?: Record<string, string>;
   em_tests?: EmTest[];
   workflow_steps?: WorkflowStep[];
 }
@@ -56,6 +58,7 @@ export interface Schedule extends BaseDoc {
   protocol_type: ProtocolType;
   harvest_day_zero?: string;
   delta_day?: number | null;
+  qc_sample_id?: string;
   test_name: string;
   workflow_step?: string;
   assignee_id: string;
@@ -102,4 +105,5 @@ export interface Filters {
   protocol: string;
   product: string;
   batch: string;
+  test: string;
 }

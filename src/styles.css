@@ -300,7 +300,7 @@ aside button:hover {
 .filtersBar,
 .formGrid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(145px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
   gap: 12px;
 }
 
@@ -339,7 +339,8 @@ aside button:hover {
 }
 
 .status-scheduled {
-  background: var(--blue);
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .status-in-progress {
@@ -351,7 +352,8 @@ aside button:hover {
 }
 
 .status-completed {
-  background: var(--green);
+  background: #dcfce7;
+  color: #166534;
 }
 
 .status-deleted {
@@ -421,7 +423,7 @@ aside button:hover {
 .testConfig,
 .inlineEdit {
   display: grid;
-  grid-template-columns: minmax(210px, 1.25fr) repeat(4, minmax(135px, 1fr)) 95px 135px 105px;
+  grid-template-columns: minmax(210px, 1.2fr) repeat(5, minmax(130px, 1fr)) 95px 135px 105px;
   gap: 10px;
   align-items: center;
   padding: 12px;
@@ -501,6 +503,14 @@ aside button:hover {
 .subPanel .inlineEdit {
   grid-template-columns: 1fr 140px auto;
   background: white;
+}
+
+.subPanel .sampleIdEdit {
+  grid-template-columns: minmax(180px, 1fr) minmax(150px, 0.7fr) auto;
+}
+
+.subPanel .emSampleIdEdit {
+  grid-template-columns: minmax(180px, 1fr) 120px minmax(150px, 0.8fr) auto;
 }
 
 .detailList {

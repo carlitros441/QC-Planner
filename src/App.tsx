@@ -26,7 +26,7 @@ import type { AdminSetting, AuditEntry, EmTest, Filters, Personnel, Product, Pro
 type Tab = 'Dashboard' | 'Create Schedule' | 'Schedules' | 'Calendar' | 'Products & Protocols' | 'Personnel' | 'Admin Settings';
 type Draft<T> = Partial<T> & { id?: string };
 
-const emptyFilters: Filters = { status: 'All', assignee: 'All', protocol: 'All', product: 'All', batch: 'All' };
+const emptyFilters: Filters = { status: 'All', assignee: 'All', protocol: 'All', product: 'All', batch: 'All', test: 'All' };
 const statusOrder: Status[] = ['Scheduled', 'In Progress', 'Pending Review', 'Completed', 'Deleted'];
 const defaultSettings: AdminSetting = {
   id: 'general',
@@ -40,6 +40,11 @@ const defaultSettings: AdminSetting = {
 const currentUserInfo = (user: User | null) => user?.email || user?.uid || 'unknown';
 const displaySiteLabel = (value?: string) => value && !/ctmc\.com/i.test(value) ? value : defaultSettings.website || 'Quality Operations';
 const initials = (name?: string) => (name || 'NA').split(/\s+/).map(part => part[0]).join('').toUpperCase().slice(0, 3);
+const getProtocolSampleId = (protocol: Protocol | undefined, testName: string) => {
+  if (!protocol || !testName) return '';
+  const emTest = protocol.em_tests?.find(test => test.name === testName);
+  return emTest?.qc_sample_id || protocol.test_sample_ids?.[testName] || '';
+};
 const effectiveProgress = (schedule: Schedule) => {
   if (schedule.status === 'Completed' || schedule.review_status === 'Completed') return 100;
   if (schedule.status === 'Pending Review' || schedule.review_status === 'Pending Review') return 80;
@@ -212,7 +217,8 @@ function filterSchedules(schedules: Schedule[], filters: Filters) {
     (filters.assignee === 'All' || schedule.assignee_id === filters.assignee) &&
     (filters.protocol === 'All' || schedule.protocol_name === filters.protocol) &&
     (filters.product === 'All' || (schedule.product_name || schedule.product_id) === filters.product) &&
-    (filters.batch === 'All' || schedule.batch_number === filters.batch)
+    (filters.batch === 'All' || schedule.batch_number === filters.batch) &&
+    (filters.test === 'All' || schedule.test_name === filters.test)
   );
 }
 
@@ -220,6 +226,7 @@ function FiltersBar({ schedules, personnel, filters, setFilters }: { schedules: 
   const protocols = [...new Set(schedules.map(item => item.protocol_name).filter(Boolean))];
   const products = [...new Set(schedules.map(item => item.product_name || item.product_id).filter(Boolean))];
   const batches = [...new Set(schedules.map(item => item.batch_number).filter(Boolean))];
+  const tests = [...new Set(schedules.map(item => item.test_name).filter(Boolean))];
   return (
     <div className="filtersBar">
       <label>Status<select value={filters.status} onChange={event => setFilters({ ...filters, status: event.target.value })}><option>All</option>{statusOrder.map(status => <option key={status}>{status}</option>)}</select></label>
@@ -227,6 +234,7 @@ function FiltersBar({ schedules, personnel, filters, setFilters }: { schedules: 
       <label>Protocol<select value={filters.protocol} onChange={event => setFilters({ ...filters, protocol: event.target.value })}><option>All</option>{protocols.map(item => <option key={item}>{item}</option>)}</select></label>
       <label>Product<select value={filters.product} onChange={event => setFilters({ ...filters, product: event.target.value })}><option>All</option>{products.map(item => <option key={item}>{item}</option>)}</select></label>
       <label>Batch<select value={filters.batch} onChange={event => setFilters({ ...filters, batch: event.target.value })}><option>All</option>{batches.map(item => <option key={item}>{item}</option>)}</select></label>
+      <label>Test<select value={filters.test} onChange={event => setFilters({ ...filters, test: event.target.value })}><option>All</option>{tests.map(item => <option key={item}>{item}</option>)}</select></label>
     </div>
   );
 }
@@ -235,6 +243,7 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user }: {
   const [filters, setFilters] = useState(emptyFilters);
   const [analystDetail, setAnalystDetail] = useState<Personnel | null>(null);
   const [detailSchedule, setDetailSchedule] = useState<Schedule | null>(null);
+  const [lotDetail, setLotDetail] = useState<{ batch: string; product: string; harvestDay: string; schedules: Schedule[] } | null>(null);
   const [edit, setEdit] = useState<Schedule | null>(null);
   const filtered = filterSchedules(schedules, filters);
   const activeSchedules = filtered.filter(item => item.status !== 'Deleted');
@@ -249,9 +258,16 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user }: {
     return acc;
   }, {})).map(lot => {
     const harvest = new Date(`${lot.harvestDay}T00:00:00`);
-    return { ...lot, daysUntil: Math.ceil((harvest.getTime() - today.getTime()) / 86400000) };
+    const completedCount = lot.schedules.filter(schedule => schedule.status === 'Completed').length;
+    const allCompleted = lot.schedules.length > 0 && completedCount === lot.schedules.length;
+    const daysUntil = Math.ceil((harvest.getTime() - today.getTime()) / 86400000);
+    const status: Status = allCompleted ? 'Completed' : daysUntil < 0 ? 'In Progress' : 'Scheduled';
+    return { ...lot, daysUntil, completedCount, allCompleted, status };
   });
-  const nextLot = lots.filter(lot => lot.daysUntil >= 0).sort((a, b) => a.daysUntil - b.daysUntil)[0];
+  const nextLot = lots.filter(lot => !lot.allCompleted && lot.daysUntil >= 0).sort((a, b) => a.daysUntil - b.daysUntil)[0];
+  const completedLots = lots.filter(lot => lot.allCompleted).sort((a, b) => b.harvestDay.localeCompare(a.harvestDay)).slice(0, 4);
+  const currentOrUpcomingLots = lots.filter(lot => !lot.allCompleted).sort((a, b) => a.daysUntil - b.daysUntil);
+  const currentActiveLots = [...currentOrUpcomingLots, ...completedLots];
   const getAssigneeName = (assigneeId: string) => personnel.find(person => person.id === assigneeId)?.name || 'Unassigned';
   const getTraineeName = (traineeId?: string) => traineeId ? personnel.find(person => person.id === traineeId)?.name || 'Unassigned' : 'None';
   const getReviewerName = (reviewerId?: string) => personnel.find(person => person.id === reviewerId)?.name || 'Unassigned';
@@ -273,6 +289,7 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user }: {
       <div><strong>Product</strong><span>{schedule.product_name || schedule.product_id}</span></div>
       <div><strong>Protocol</strong><span>{schedule.protocol_name}</span></div>
       <div><strong>Test</strong><span>{schedule.test_name}</span></div>
+      <div><strong>QC Sample ID</strong><span>{schedule.qc_sample_id || 'Not set'}</span></div>
       <div><strong>Scheduled Date</strong><span>{formatDate(schedule.start_time)}</span></div>
       <div><strong>Main Analyst</strong><span>{getAssigneeName(schedule.assignee_id)}</span></div>
       <div><strong>Trainee Analyst</strong><span>{getTraineeName(schedule.trainee_id)}</span></div>
@@ -306,13 +323,15 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user }: {
           })}
         </div>
         <div className="panel">
-          <h2>Recent schedule activity</h2>
+          <h2>Current active lots</h2>
           <div className="compactList">
-            {filtered.slice(0, 8).map(item => <button className="interactiveRow recentActivityRow" key={item.id} onClick={() => setDetailSchedule(item)}><div><strong>{item.batch_number}</strong><span>{item.test_name}</span><small>{formatDate(item.harvest_day_zero) || 'Harvest day not set'}</small></div><StatusBadge status={item.status} /></button>)}
+            {currentActiveLots.map(lot => <button className="interactiveRow recentActivityRow" key={`${lot.product}-${lot.batch}-${lot.harvestDay}`} onClick={() => setLotDetail(lot)}><div><strong>{lot.batch}</strong><span>{lot.product}</span><small>{lot.allCompleted ? 'Previously completed lot' : lot.daysUntil < 0 ? `Harvest ${Math.abs(lot.daysUntil)} day${Math.abs(lot.daysUntil) === 1 ? '' : 's'} ago` : lot.daysUntil === 0 ? 'Harvest today' : `Harvest in ${lot.daysUntil} day${lot.daysUntil === 1 ? '' : 's'}`} / {lot.completedCount} of {lot.schedules.length} tests complete</small></div><StatusBadge status={lot.status} /></button>)}
+            {!currentActiveLots.length && <p>No current, upcoming, or recently completed lots.</p>}
           </div>
         </div>
       </div>
       {analystDetail && <Modal title={`${analystDetail.name} Workload`} onClose={() => setAnalystDetail(null)}><div className="detailList">{analystSchedules.map(schedule => <div key={schedule.id} className="recordRow"><div><strong>{schedule.batch_number} / {schedule.test_name}</strong><span>{schedule.product_name || schedule.product_id}</span><small>Harvest {formatDate(schedule.harvest_day_zero) || 'not set'} / Scheduled {formatDate(schedule.start_time)}</small></div><div><StatusBadge status={schedule.status} /><button onClick={() => { setAnalystDetail(null); setDetailSchedule(schedule); }}>Details</button><button onClick={() => { setAnalystDetail(null); setEdit(schedule); }}>Edit</button></div></div>)}{!analystSchedules.length && <p>No active schedules for this analyst.</p>}</div></Modal>}
+      {lotDetail && <Modal title={`${lotDetail.batch} Lot Details`} onClose={() => setLotDetail(null)}><div className="detailList">{lotDetail.schedules.map(schedule => <div key={schedule.id} className="recordRow"><div><strong>{schedule.test_name}</strong><span>{schedule.product_name || schedule.product_id}</span><small>QC Sample ID {schedule.qc_sample_id || 'not set'} / Scheduled {formatDate(schedule.start_time)}</small></div><div><StatusBadge status={schedule.status} /><button onClick={() => { setLotDetail(null); setDetailSchedule(schedule); }}>Details</button><button onClick={() => { setLotDetail(null); setEdit(schedule); }}>Edit</button></div></div>)}</div></Modal>}
       {detailSchedule && <Modal title="Schedule Details" onClose={() => setDetailSchedule(null)}><ScheduleDetails schedule={detailSchedule} /></Modal>}
       {edit && <Modal title="Edit Schedule" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={saveDashboardSchedule} /></Modal>}
     </section>
@@ -325,7 +344,7 @@ function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; 
 
 function CreateSchedule({ products, protocols, personnel, refreshSchedules, user }: { products: Product[]; protocols: Protocol[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null }) {
   const [form, setForm] = useState({ product_id: '', product_name: '', batch_number: '', protocol_name: '', harvest_day_zero: '' });
-  const [configs, setConfigs] = useState<Record<string, { include: boolean; assignee_id: string; trainee_id: string; reviewer_id: string; is_all_day: boolean; start_time: string; end_time: string; duration_days: number; delta_day: number; workflow_step: string }>>({});
+  const [configs, setConfigs] = useState<Record<string, { include: boolean; assignee_id: string; trainee_id: string; reviewer_id: string; is_all_day: boolean; start_time: string; end_time: string; duration_days: number; delta_day: number; workflow_step: string; qc_sample_id: string }>>({});
   const [message, setMessage] = useState('');
   const selectedProduct = products.find(product => product.id === form.product_id);
   const options = protocols.filter(protocol => protocol.product_id === form.product_id || protocol.product_name === selectedProduct?.name);
@@ -343,7 +362,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
     setForm({ ...form, protocol_name: protocolName });
     const tests = protocol?.protocol_type === 'EM Protocol' && protocol.em_tests?.length ? protocol.em_tests.map(item => item.name) : protocol?.tests || [];
     const deltaByName = (protocol?.em_tests || []).reduce<Record<string, number>>((acc, item) => ({ ...acc, [item.name]: Number(item.delta_day || 0) }), {});
-    setConfigs(Object.fromEntries(tests.map(test => [test, { include: protocol?.protocol_type === 'EM Protocol', assignee_id: '', trainee_id: '', reviewer_id: '', is_all_day: true, start_time: '', end_time: '', duration_days: 1, delta_day: deltaByName[test] || 0, workflow_step: protocol?.workflow_steps?.[0]?.name || '' }])));
+    setConfigs(Object.fromEntries(tests.map(test => [test, { include: protocol?.protocol_type === 'EM Protocol', assignee_id: '', trainee_id: '', reviewer_id: '', is_all_day: true, start_time: '', end_time: '', duration_days: 1, delta_day: deltaByName[test] || 0, workflow_step: protocol?.workflow_steps?.[0]?.name || '', qc_sample_id: getProtocolSampleId(protocol, test) }])));
   };
 
   const updateHarvest = (value: string) => {
@@ -375,6 +394,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
           protocol_type: selectedProtocol.protocol_type || 'QC Sample Plan',
           harvest_day_zero: form.harvest_day_zero,
           delta_day: isEm ? config.delta_day : null,
+          qc_sample_id: getProtocolSampleId(selectedProtocol, testName),
           test_name: testName,
           workflow_step: config.workflow_step,
           assignee_id: config.assignee_id,
@@ -417,6 +437,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
               <select disabled={!config.include} required={config.include} value={config.assignee_id} onChange={event => setConfigs({ ...configs, [testName]: { ...config, assignee_id: event.target.value, trainee_id: config.trainee_id === event.target.value ? '' : config.trainee_id, reviewer_id: config.reviewer_id === event.target.value ? '' : config.reviewer_id } })}><option value="">Main Analyst</option>{personnel.filter(person => person.active !== false).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
               <select disabled={!config.include} value={config.trainee_id} onChange={event => setConfigs({ ...configs, [testName]: { ...config, trainee_id: event.target.value, reviewer_id: config.reviewer_id === event.target.value ? '' : config.reviewer_id } })}><option value="">Trainee Analyst</option>{personnel.filter(person => person.active !== false && person.id !== config.assignee_id && person.id !== config.reviewer_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
               <select disabled={!config.include} required={config.include} value={config.reviewer_id} onChange={event => setConfigs({ ...configs, [testName]: { ...config, reviewer_id: event.target.value, trainee_id: config.trainee_id === event.target.value ? '' : config.trainee_id } })}><option value="">QC Reviewer</option>{personnel.filter(person => person.active !== false && person.id !== config.assignee_id && person.id !== config.trainee_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
+              <input disabled value={config.qc_sample_id || 'No QC Sample ID'} aria-label={`${testName} QC Sample ID`} />
               <select disabled={!config.include} value={config.workflow_step} onChange={event => setConfigs({ ...configs, [testName]: { ...config, workflow_step: event.target.value } })}><option value="">Workflow step</option>{selectedProtocol?.workflow_steps?.map(step => <option key={step.id}>{step.name}</option>)}</select>
               {isEm ? <>
                 <input type="number" step="1" value={config.delta_day} onChange={event => setConfigs({ ...configs, [testName]: { ...config, delta_day: Number(event.target.value || 0), start_time: addDays(form.harvest_day_zero, Number(event.target.value || 0)) } })} />
@@ -543,7 +564,7 @@ function Schedules({ schedules, personnel, refreshSchedules, user, settings }: {
           <thead><tr>{sortableHeader('test_name', 'Test')}{sortableHeader('product', 'Product')}{sortableHeader('batch_number', 'Batch')}{sortableHeader('assignee', 'Main Analyst')}{sortableHeader('trainee', 'Trainee')}{sortableHeader('reviewer', 'QC Reviewer')}{sortableHeader('start_time', 'Date')}{sortableHeader('progress', 'Progress')}{sortableHeader('status', 'Status')}{sortableHeader('email_status', 'Email')}<th>Actions</th></tr></thead>
           <tbody>
             {filtered.map(schedule => <tr key={schedule.id}>
-              <td><strong>{schedule.test_name}</strong><small>{schedule.workflow_step || schedule.protocol_name}</small></td>
+              <td><strong>{schedule.test_name}</strong><small>{schedule.workflow_step || schedule.protocol_name}</small><small>QC Sample ID: {schedule.qc_sample_id || 'Not set'}</small></td>
               <td>{schedule.product_name || schedule.product_id}</td>
               <td>{schedule.batch_number}</td>
               <td>{getAssigneeName(schedule.assignee_id)}</td>
@@ -579,6 +600,7 @@ function ScheduleEditor({ schedule, personnel, setSchedule, onSave }: { schedule
       <label>Main Analyst<select value={schedule.assignee_id} onChange={event => setSchedule({ ...schedule, assignee_id: event.target.value, trainee_id: schedule.trainee_id === event.target.value ? '' : schedule.trainee_id, reviewer_id: schedule.reviewer_id === event.target.value ? '' : schedule.reviewer_id })}>{activePersonnel.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
       <label>Trainee Analyst<select value={schedule.trainee_id || ''} onChange={event => setSchedule({ ...schedule, trainee_id: event.target.value, reviewer_id: schedule.reviewer_id === event.target.value ? '' : schedule.reviewer_id })}><option value="">No trainee</option>{activePersonnel.filter(person => person.id !== schedule.assignee_id && person.id !== schedule.reviewer_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
       <label>QC Reviewer<select value={schedule.reviewer_id || ''} onChange={event => setSchedule({ ...schedule, reviewer_id: event.target.value, trainee_id: schedule.trainee_id === event.target.value ? '' : schedule.trainee_id })}><option value="">Select reviewer</option>{activePersonnel.filter(person => person.id !== schedule.assignee_id && person.id !== schedule.trainee_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+      <label>QC Sample ID<input value={schedule.qc_sample_id || 'Not set'} readOnly disabled /></label>
       <label>Harvest Day<input type="date" value={formatDate(schedule.harvest_day_zero)} onChange={event => setHarvestDay(event.target.value)} /></label>
       <label>Start<input type={schedule.is_all_day ? 'date' : 'datetime-local'} value={schedule.start_time} onChange={event => setSchedule({ ...schedule, start_time: event.target.value })} /></label>
       <label>Execution Progress<input type="number" min={0} max={80} value={Math.min(schedule.progress || 0, 80)} onChange={event => setSchedule({ ...schedule, progress: Number(event.target.value) })} /></label>
@@ -633,7 +655,7 @@ function CalendarView({ schedules, personnel, refreshSchedules, user }: { schedu
     const nextStatus: Status = executionProgress > 0 ? 'In Progress' : 'Scheduled';
     await saveCalendarSchedule({ ...selected, progress: executionProgress, status: nextStatus }, 'PROGRESS_UPDATE', reason);
   };
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Calendar control</p><h1>QC Schedule Calendar</h1></div><select value={view} onChange={event => setView(event.target.value)}><option value="dayGridMonth">Month</option><option value="timeGridWeek">Week</option><option value="timeGridDay">Day</option><option value="listWeek">List</option></select></div><FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} /><div className="calendarPanel"><FullCalendar plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]} initialView={view} key={view} events={events} height="auto" headerToolbar={{ left: 'prev,next today', center: 'title', right: '' }} eventClick={info => setSelected(filtered.find(schedule => schedule.id === info.event.id) || null)} /></div>{selected && <Modal title="Scheduled Assay Details" onClose={() => setSelected(null)}><div className="detailsGrid"><div><strong>Test</strong><span>{selected.test_name}</span></div><div><strong>Batch</strong><span>{selected.batch_number}</span></div><div><strong>Product</strong><span>{selected.product_name || selected.product_id}</span></div><div><strong>Protocol</strong><span>{selected.protocol_name}</span></div><div><strong>Main Analyst</strong><span>{personnel.find(person => person.id === selected.assignee_id)?.name || 'Unassigned'}</span></div><div><strong>Trainee Analyst</strong><span>{selected.trainee_id ? personnel.find(person => person.id === selected.trainee_id)?.name || 'Unassigned' : 'None'}</span></div><div><strong>QC Reviewer</strong><span>{personnel.find(person => person.id === selected.reviewer_id)?.name || 'Unassigned'}</span></div><div><strong>Date</strong><span>{formatDate(selected.start_time)}</span></div><div><strong>Status</strong><StatusBadge status={selected.status} /></div><div className="wide"><strong>Progress</strong><ProgressBar schedule={selected} /></div><label className="wide">Execution Progress: {Math.min(selected.progress || 0, 80)}%<input type="range" min={0} max={80} step={5} value={Math.min(selected.progress || 0, 80)} onChange={event => setSelected({ ...selected, progress: Number(event.target.value) })} /></label><div className="wide modalActions"><button className="primaryButton" onClick={saveProgress}>Save Progress</button><button className="primaryButton" onClick={markComplete}>Test Complete</button><button className="primaryButton" onClick={markReviewComplete}>Review Complete</button></div></div></Modal>}</section>;
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Calendar control</p><h1>QC Schedule Calendar</h1></div><select value={view} onChange={event => setView(event.target.value)}><option value="dayGridMonth">Month</option><option value="timeGridWeek">Week</option><option value="timeGridDay">Day</option><option value="listWeek">List</option></select></div><FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} /><div className="calendarPanel"><FullCalendar plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]} initialView={view} key={view} events={events} height="auto" headerToolbar={{ left: 'prev,next today', center: 'title', right: '' }} eventClick={info => setSelected(filtered.find(schedule => schedule.id === info.event.id) || null)} /></div>{selected && <Modal title="Scheduled Assay Details" onClose={() => setSelected(null)}><div className="detailsGrid"><div><strong>Test</strong><span>{selected.test_name}</span></div><div><strong>QC Sample ID</strong><span>{selected.qc_sample_id || 'Not set'}</span></div><div><strong>Batch</strong><span>{selected.batch_number}</span></div><div><strong>Product</strong><span>{selected.product_name || selected.product_id}</span></div><div><strong>Protocol</strong><span>{selected.protocol_name}</span></div><div><strong>Main Analyst</strong><span>{personnel.find(person => person.id === selected.assignee_id)?.name || 'Unassigned'}</span></div><div><strong>Trainee Analyst</strong><span>{selected.trainee_id ? personnel.find(person => person.id === selected.trainee_id)?.name || 'Unassigned' : 'None'}</span></div><div><strong>QC Reviewer</strong><span>{personnel.find(person => person.id === selected.reviewer_id)?.name || 'Unassigned'}</span></div><div><strong>Date</strong><span>{formatDate(selected.start_time)}</span></div><div><strong>Status</strong><StatusBadge status={selected.status} /></div><div className="wide"><strong>Progress</strong><ProgressBar schedule={selected} /></div><label className="wide">Execution Progress: {Math.min(selected.progress || 0, 80)}%<input type="range" min={0} max={80} step={5} value={Math.min(selected.progress || 0, 80)} onChange={event => setSelected({ ...selected, progress: Number(event.target.value) })} /></label><div className="wide modalActions"><button className="primaryButton" onClick={saveProgress}>Save Progress</button><button className="primaryButton" onClick={markComplete}>Test Complete</button><button className="primaryButton" onClick={markReviewComplete}>Review Complete</button></div></div></Modal>}</section>;
 }
 
 function ProductsProtocols({ products, protocols, refreshProducts, refreshProtocols }: { products: Product[]; protocols: Protocol[]; refreshProducts: () => Promise<void>; refreshProtocols: () => Promise<void> }) {
@@ -644,20 +666,67 @@ function ProductsProtocols({ products, protocols, refreshProducts, refreshProtoc
     if (!protocolEdit?.name || !protocolEdit.product_id) return;
     const product = products.find(item => item.id === protocolEdit.product_id);
     const payload = { ...protocolEdit, product_name: product?.name || protocolEdit.product_name || '', product_type: product?.name || '', protocol_type: protocolEdit.protocol_type || 'QC Sample Plan' as ProtocolType };
-    if (payload.protocol_type === 'EM Protocol') payload.tests = (payload.em_tests || []).map(item => item.name).filter(Boolean);
+    if (payload.protocol_type === 'EM Protocol') {
+      payload.em_tests = (payload.em_tests || []).map(item => ({ ...item, name: item.name.trim(), qc_sample_id: item.qc_sample_id?.trim() || '' })).filter(item => item.name);
+      payload.tests = payload.em_tests.map(item => item.name);
+    }
+    if (payload.protocol_type !== 'EM Protocol') {
+      payload.tests = (payload.tests || []).map(test => test.trim()).filter(Boolean);
+      payload.test_sample_ids = Object.fromEntries(payload.tests.map(test => [test, payload.test_sample_ids?.[test]?.trim() || '']));
+    }
     await saveDoc('protocols', payload, payload.id);
     await refreshProtocols();
     setProtocolEdit(null);
   };
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Master data</p><h1>Products & Protocols</h1></div></div><div className="twoColumn"><div className="panel"><div className="panelHeader"><h2>Products</h2><button onClick={() => setProductEdit({ name: '', product_type: '', description: '', test_frequency: '' })}>Add Product</button></div>{products.map(product => <div className="recordRow" key={product.id}><div><strong>{product.name}</strong><span>{product.product_type}</span></div><div><button onClick={() => setProductEdit(product)}>Edit</button><button onClick={() => removeDoc('products', product.id).then(refreshProducts)}>Delete</button></div></div>)}</div><div className="panel"><div className="panelHeader"><h2>Protocols</h2><button onClick={() => setProtocolEdit({ name: '', product_id: '', product_name: '', protocol_type: 'QC Sample Plan', tests: [], em_tests: [], workflow_steps: [] })}>Add Protocol</button></div>{protocols.map(protocol => <div className="recordRow" key={protocol.id}><div><strong>{protocol.name}</strong><span>{protocol.protocol_type} / {protocol.product_name}</span><small>{(protocol.em_tests?.length ? protocol.em_tests.map(test => `${test.name} Day ${test.delta_day}`) : protocol.tests || []).join(', ')}</small></div><div><button onClick={() => setProtocolEdit({ ...protocol, em_tests: protocol.em_tests || [], workflow_steps: protocol.workflow_steps || [] })}>Edit</button><button onClick={() => removeDoc('protocols', protocol.id).then(refreshProtocols)}>Delete</button></div></div>)}</div></div>{productEdit && <Modal title="Product" onClose={() => setProductEdit(null)}><div className="formGrid"><label>Name<input value={productEdit.name || ''} onChange={event => setProductEdit({ ...productEdit, name: event.target.value })} /></label><label>Type<input value={productEdit.product_type || ''} onChange={event => setProductEdit({ ...productEdit, product_type: event.target.value })} /></label><label className="wide">Description<input value={productEdit.description || ''} onChange={event => setProductEdit({ ...productEdit, description: event.target.value })} /></label><button className="primaryButton wide" onClick={saveProduct}>Save Product</button></div></Modal>}{protocolEdit && <ProtocolModal protocol={protocolEdit} products={products} setProtocol={setProtocolEdit} onSave={saveProtocol} onClose={() => setProtocolEdit(null)} />}</section>;
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Master data</p><h1>Products & Protocols</h1></div></div><div className="twoColumn"><div className="panel"><div className="panelHeader"><h2>Products</h2><button onClick={() => setProductEdit({ name: '', product_type: '', description: '', test_frequency: '' })}>Add Product</button></div>{products.map(product => <div className="recordRow" key={product.id}><div><strong>{product.name}</strong><span>{product.product_type}</span></div><div><button onClick={() => setProductEdit(product)}>Edit</button><button onClick={() => removeDoc('products', product.id).then(refreshProducts)}>Delete</button></div></div>)}</div><div className="panel"><div className="panelHeader"><h2>Protocols</h2><button onClick={() => setProtocolEdit({ name: '', product_id: '', product_name: '', protocol_type: 'QC Sample Plan', tests: [], test_sample_ids: {}, em_tests: [], workflow_steps: [] })}>Add Protocol</button></div>{protocols.map(protocol => <div className="recordRow" key={protocol.id}><div><strong>{protocol.name}</strong><span>{protocol.protocol_type} / {protocol.product_name}</span><small>{(protocol.em_tests?.length ? protocol.em_tests.map(test => `${test.name} Day ${test.delta_day}${test.qc_sample_id ? ` / ${test.qc_sample_id}` : ''}`) : (protocol.tests || []).map(test => `${test}${protocol.test_sample_ids?.[test] ? ` / ${protocol.test_sample_ids[test]}` : ''}`)).join(', ')}</small></div><div><button onClick={() => setProtocolEdit({ ...protocol, test_sample_ids: protocol.test_sample_ids || {}, em_tests: protocol.em_tests || [], workflow_steps: protocol.workflow_steps || [] })}>Edit</button><button onClick={() => removeDoc('protocols', protocol.id).then(refreshProtocols)}>Delete</button></div></div>)}</div></div>{productEdit && <Modal title="Product" onClose={() => setProductEdit(null)}><div className="formGrid"><label>Name<input value={productEdit.name || ''} onChange={event => setProductEdit({ ...productEdit, name: event.target.value })} /></label><label>Type<input value={productEdit.product_type || ''} onChange={event => setProductEdit({ ...productEdit, product_type: event.target.value })} /></label><label className="wide">Description<input value={productEdit.description || ''} onChange={event => setProductEdit({ ...productEdit, description: event.target.value })} /></label><button className="primaryButton wide" onClick={saveProduct}>Save Product</button></div></Modal>}{protocolEdit && <ProtocolModal protocol={protocolEdit} products={products} setProtocol={setProtocolEdit} onSave={saveProtocol} onClose={() => setProtocolEdit(null)} />}</section>;
 }
 
 function ProtocolModal({ protocol, products, setProtocol, onSave, onClose }: { protocol: Draft<Protocol>; products: Product[]; setProtocol: (protocol: Draft<Protocol>) => void; onSave: () => void; onClose: () => void }) {
+  const tests = protocol.tests || [];
+  const testSampleIds = protocol.test_sample_ids || {};
   const emTests = protocol.em_tests || [];
   const steps = protocol.workflow_steps || [];
+  const setTestName = (index: number, name: string) => {
+    const previous = tests[index];
+    const nextTests = tests.map((item, i) => i === index ? name : item);
+    const nextSampleIds = { ...testSampleIds };
+    if (previous !== name) {
+      nextSampleIds[name] = nextSampleIds[previous] || '';
+      delete nextSampleIds[previous];
+    }
+    setProtocol({ ...protocol, tests: nextTests, test_sample_ids: nextSampleIds });
+  };
+  const setTestSampleId = (testName: string, qcSampleId: string) => setProtocol({ ...protocol, test_sample_ids: { ...testSampleIds, [testName]: qcSampleId } });
+  const removeTest = (index: number) => {
+    const removed = tests[index];
+    const nextSampleIds = { ...testSampleIds };
+    delete nextSampleIds[removed];
+    setProtocol({ ...protocol, tests: tests.filter((_, i) => i !== index), test_sample_ids: nextSampleIds });
+  };
   const setEmTest = (index: number, patch: Partial<EmTest>) => setProtocol({ ...protocol, em_tests: emTests.map((item, i) => i === index ? { ...item, ...patch } : item) });
   const setStep = (index: number, patch: Partial<WorkflowStep>) => setProtocol({ ...protocol, workflow_steps: steps.map((item, i) => i === index ? { ...item, ...patch } : item) });
-  return <Modal title="Protocol" onClose={onClose}><div className="formGrid"><label>Protocol Name<input value={protocol.name || ''} onChange={event => setProtocol({ ...protocol, name: event.target.value })} /></label><label>Sub-Protocol Type<select value={protocol.protocol_type || 'QC Sample Plan'} onChange={event => setProtocol({ ...protocol, protocol_type: event.target.value as ProtocolType })}><option>QC Sample Plan</option><option>EM Protocol</option></select></label><label>Product Name<select value={protocol.product_id || ''} onChange={event => setProtocol({ ...protocol, product_id: event.target.value, product_name: products.find(product => product.id === event.target.value)?.name || '' })}><option value="">Select product</option>{products.map(product => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label>{protocol.protocol_type === 'EM Protocol' ? <div className="wide subPanel"><div className="panelHeader"><h3>EM Tests and Delta Days</h3><button onClick={() => setProtocol({ ...protocol, em_tests: [...emTests, { name: '', delta_day: 0 }] })}>Add Test</button></div>{emTests.map((test, index) => <div className="inlineEdit" key={index}><input placeholder="Test name" value={test.name} onChange={event => setEmTest(index, { name: event.target.value })} /><input type="number" value={test.delta_day} onChange={event => setEmTest(index, { delta_day: Number(event.target.value || 0) })} /><button onClick={() => setProtocol({ ...protocol, em_tests: emTests.filter((_, i) => i !== index) })}>Remove</button></div>)}</div> : <label className="wide">Tests<input value={(protocol.tests || []).join(', ')} onChange={event => setProtocol({ ...protocol, tests: event.target.value.split(',').map(item => item.trim()).filter(Boolean) })} /></label>}<div className="wide subPanel"><div className="panelHeader"><h3>Dynamic assay workflow steps</h3><button onClick={() => setProtocol({ ...protocol, workflow_steps: [...steps, { id: crypto.randomUUID(), name: '', expected_days: 1, required: true }] })}>Add Step</button></div>{steps.map((step, index) => <div className="inlineEdit" key={step.id}><input placeholder="Step name" value={step.name} onChange={event => setStep(index, { name: event.target.value })} /><input type="number" min={0} value={step.expected_days || 0} onChange={event => setStep(index, { expected_days: Number(event.target.value) })} /><button onClick={() => setProtocol({ ...protocol, workflow_steps: steps.filter((_, i) => i !== index) })}>Remove</button></div>)}</div><button className="primaryButton wide" onClick={onSave}>Save Protocol</button></div></Modal>;
+  return (
+    <Modal title="Protocol" onClose={onClose}>
+      <div className="formGrid">
+        <label>Protocol Name<input value={protocol.name || ''} onChange={event => setProtocol({ ...protocol, name: event.target.value })} /></label>
+        <label>Sub-Protocol Type<select value={protocol.protocol_type || 'QC Sample Plan'} onChange={event => setProtocol({ ...protocol, protocol_type: event.target.value as ProtocolType })}><option>QC Sample Plan</option><option>EM Protocol</option></select></label>
+        <label>Product Name<select value={protocol.product_id || ''} onChange={event => setProtocol({ ...protocol, product_id: event.target.value, product_name: products.find(product => product.id === event.target.value)?.name || '' })}><option value="">Select product</option>{products.map(product => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label>
+        {protocol.protocol_type === 'EM Protocol' ? (
+          <div className="wide subPanel">
+            <div className="panelHeader"><h3>EM Tests, Delta Days, and QC Sample IDs</h3><button onClick={() => setProtocol({ ...protocol, em_tests: [...emTests, { name: '', delta_day: 0, qc_sample_id: '' }] })}>Add Test</button></div>
+            {emTests.map((test, index) => <div className="inlineEdit sampleIdEdit emSampleIdEdit" key={index}><input placeholder="Test name" value={test.name} onChange={event => setEmTest(index, { name: event.target.value })} /><input type="number" placeholder="Delta day" value={test.delta_day} onChange={event => setEmTest(index, { delta_day: Number(event.target.value || 0) })} /><input placeholder="QC Sample ID" value={test.qc_sample_id || ''} onChange={event => setEmTest(index, { qc_sample_id: event.target.value })} /><button onClick={() => setProtocol({ ...protocol, em_tests: emTests.filter((_, i) => i !== index) })}>Remove</button></div>)}
+          </div>
+        ) : (
+          <div className="wide subPanel">
+            <div className="panelHeader"><h3>Tests and QC Sample IDs</h3><button onClick={() => setProtocol({ ...protocol, tests: [...tests, ''], test_sample_ids: testSampleIds })}>Add Test</button></div>
+            {tests.map((test, index) => <div className="inlineEdit sampleIdEdit" key={index}><input placeholder="Test name" value={test} onChange={event => setTestName(index, event.target.value)} /><input placeholder="QC Sample ID" value={testSampleIds[test] || ''} onChange={event => setTestSampleId(test, event.target.value)} /><button onClick={() => removeTest(index)}>Remove</button></div>)}
+          </div>
+        )}
+        <div className="wide subPanel"><div className="panelHeader"><h3>Dynamic assay workflow steps</h3><button onClick={() => setProtocol({ ...protocol, workflow_steps: [...steps, { id: crypto.randomUUID(), name: '', expected_days: 1, required: true }] })}>Add Step</button></div>{steps.map((step, index) => <div className="inlineEdit" key={step.id}><input placeholder="Step name" value={step.name} onChange={event => setStep(index, { name: event.target.value })} /><input type="number" min={0} value={step.expected_days || 0} onChange={event => setStep(index, { expected_days: Number(event.target.value) })} /><button onClick={() => setProtocol({ ...protocol, workflow_steps: steps.filter((_, i) => i !== index) })}>Remove</button></div>)}</div>
+        <button className="primaryButton wide" onClick={onSave}>Save Protocol</button>
+      </div>
+    </Modal>
+  );
 }
 
 function PersonnelPage({ personnel, refreshPersonnel }: { personnel: Personnel[]; refreshPersonnel: () => Promise<void> }) {
@@ -713,6 +782,7 @@ function downloadIcs(schedule: Schedule, personnel: Personnel[], settings: Admin
   const description = `You have been assigned a QC test: ${schedule.test_name}
 (${schedule.protocol_name})
 Batch Number: ${schedule.batch_number}
+QC Sample ID: ${schedule.qc_sample_id || 'Not set'}
 Product: ${schedule.product_name || schedule.product_id}
 Main Analyst: ${assignee?.name || 'Unassigned'}
 Trainee Analyst: ${trainee?.name || 'None'}

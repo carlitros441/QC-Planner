@@ -11,6 +11,7 @@ Theme: clean quality operations dashboard
 - Google Cloud Firestore data storage
 - Dashboard with filters and summary metrics
 - Product and protocol master data
+- Protocol-level QC Sample IDs copied into scheduled assay details
 - QC Sample Plan and EM Protocol sub-protocols
 - EM Protocol test delta days from Day 0 Harvest
 - Dynamic assay workflow steps per protocol
