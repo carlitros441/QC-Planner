@@ -59,6 +59,7 @@ export interface Schedule extends BaseDoc {
   test_name: string;
   workflow_step?: string;
   assignee_id: string;
+  trainee_id?: string;
   reviewer_id?: string;
   start_time: string;
   end_time?: string;

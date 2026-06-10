@@ -421,7 +421,7 @@ aside button:hover {
 .testConfig,
 .inlineEdit {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr 1fr 110px 145px 110px;
+  grid-template-columns: minmax(210px, 1.25fr) repeat(4, minmax(135px, 1fr)) 95px 135px 105px;
   gap: 10px;
   align-items: center;
   padding: 12px;

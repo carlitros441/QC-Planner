@@ -14,7 +14,7 @@ Theme: clean quality operations dashboard
 - QC Sample Plan and EM Protocol sub-protocols
 - EM Protocol test delta days from Day 0 Harvest
 - Dynamic assay workflow steps per protocol
-- Analyst assignment and schedule dates
+- Main analyst, optional trainee analyst, QC reviewer, and schedule dates
 - Calendar views: day, week, month, and list
 - Status badges and progress tracking
 - GMP audit/history log for schedule changes
