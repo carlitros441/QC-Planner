@@ -2,11 +2,12 @@
 
 QC Planner is a production-ready React + Vite + TypeScript web app for QC schedule planning, analyst assignments, assay workflows, GMP-style audit history, Firebase Authentication, Google Cloud Firestore, and GitHub Pages deployment.
 
-Theme: `www.CTMC.com`
+Theme: clean quality operations dashboard
 
 ## Features
 
 - Firebase Authentication login
+- Signed-in user password changes
 - Google Cloud Firestore data storage
 - Dashboard with filters and summary metrics
 - Product and protocol master data

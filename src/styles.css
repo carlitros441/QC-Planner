@@ -168,8 +168,14 @@ aside button:hover {
   font-size: 0.76rem;
 }
 
-.signOut {
+.accountActions {
   margin-top: auto;
+  display: grid;
+  gap: 6px;
+}
+
+.signOut {
+  margin-top: 0;
 }
 
 .appShell > main {

@@ -1,5 +1,5 @@
 import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
+import { EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, signInWithEmailAndPassword, signOut, updatePassword, User } from 'firebase/auth';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   LogOut,
   Mail,
+  KeyRound,
   Settings,
   ShieldCheck,
   Users
@@ -30,13 +31,14 @@ const statusOrder: Status[] = ['Scheduled', 'In Progress', 'Pending Review', 'Co
 const defaultSettings: AdminSetting = {
   id: 'general',
   organizationName: 'CTMC',
-  website: 'www.CTMC.com',
+  website: 'Quality Operations',
   inviteMode: 'draft-only',
   defaultCalendarLocation: 'QC Laboratory',
   allowAnalystEdits: false
 };
 
 const currentUserInfo = (user: User | null) => user?.email || user?.uid || 'unknown';
+const displaySiteLabel = (value?: string) => value && !/ctmc\.com/i.test(value) ? value : defaultSettings.website || 'Quality Operations';
 const initials = (name?: string) => (name || 'NA').split(/\s+/).map(part => part[0]).join('').toUpperCase().slice(0, 3);
 const effectiveProgress = (schedule: Schedule) => {
   if (schedule.status === 'Completed' || schedule.review_status === 'Completed') return 100;
@@ -146,7 +148,7 @@ function LoginScreen() {
   return (
     <main className="authPage">
       <form className="authCard" onSubmit={submit}>
-        <div className="brandMark">www.CTMC.com</div>
+        <div className="brandMark">QC Planner</div>
         <h1>QC Planner</h1>
         <p>Sign in with an account created by your Firebase administrator.</p>
         <label>Email<input type="email" required value={email} onChange={event => setEmail(event.target.value)} /></label>
@@ -155,6 +157,52 @@ function LoginScreen() {
         <button className="primaryButton" disabled={loading}>{loading ? 'Signing in...' : 'Sign In'}</button>
       </form>
     </main>
+  );
+}
+
+function ChangePasswordModal({ user, onClose }: { user: User; onClose: () => void }) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setMessage('');
+    setError('');
+    if (!user.email) return setError('This account does not have an email address available for password verification.');
+    if (newPassword.length < 6) return setError('New password must be at least 6 characters.');
+    if (newPassword !== confirmPassword) return setError('New password and confirmation do not match.');
+    setSaving(true);
+    try {
+      const credential = EmailAuthProvider.credential(user.email, currentPassword);
+      await reauthenticateWithCredential(user, credential);
+      await updatePassword(user, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setMessage('Password updated.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update password.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Change Password" onClose={onClose}>
+      <form className="formGrid" onSubmit={submit}>
+        <label className="wide">Signed-in Account<input value={user.email || user.uid} disabled readOnly /></label>
+        <label>Current Password<input type="password" required value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} /></label>
+        <label>New Password<input type="password" required minLength={6} value={newPassword} onChange={event => setNewPassword(event.target.value)} /></label>
+        <label>Confirm New Password<input type="password" required minLength={6} value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} /></label>
+        <button className="primaryButton wide" disabled={saving}>{saving ? 'Updating...' : 'Update Password'}</button>
+        {message && <div className="infoBox wide">{message}</div>}
+        {error && <div className="errorBox wide">{error}</div>}
+      </form>
+    </Modal>
   );
 }
 
@@ -235,7 +283,7 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user }: {
 
   return (
     <section className="screen">
-      <div className="screenHeader"><div><p className="eyebrow">{settings.website || defaultSettings.website} operations</p><h1>Dashboard</h1></div></div>
+      <div className="screenHeader"><div><p className="eyebrow">{displaySiteLabel(settings.website)} operations</p><h1>Dashboard</h1></div></div>
       <FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} />
       <div className="metricGrid">
         <Metric icon={<ClipboardList />} label="Visible Tests" value={filtered.length} />
@@ -612,12 +660,12 @@ function AdminSettingsPage({ settings, onSaved }: { settings: AdminSetting; onSa
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    setDraft(settings);
+    setDraft({ ...settings, website: displaySiteLabel(settings.website) });
   }, [settings]);
 
   const save = async () => {
     setMessage('');
-    const payload = { ...defaultSettings, ...draft, id: 'general' };
+    const payload = { ...defaultSettings, ...draft, website: displaySiteLabel(draft.website), id: 'general' };
     try {
       await saveDoc('adminSettings', payload, 'general');
       onSaved(payload);
@@ -627,7 +675,7 @@ function AdminSettingsPage({ settings, onSaved }: { settings: AdminSetting; onSa
     }
   };
 
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Configuration</p><h1>Admin Settings</h1></div></div><div className="panel formGrid"><label>Organization Name<input value={draft.organizationName || ''} onChange={event => setDraft({ ...draft, organizationName: event.target.value })} /></label><label>Website<input value={draft.website || ''} onChange={event => setDraft({ ...draft, website: event.target.value })} /></label><label>Email Workflow<select value={draft.inviteMode || 'draft-only'} onChange={event => setDraft({ ...draft, inviteMode: event.target.value as AdminSetting['inviteMode'] })}><option value="draft-only">Draft ICS Download</option><option value="apps-script">Apps Script Mail Queue</option></select></label><label>Calendar Location<input value={draft.defaultCalendarLocation || ''} onChange={event => setDraft({ ...draft, defaultCalendarLocation: event.target.value })} /></label><label className="checkLine wide"><input type="checkbox" checked={draft.allowAnalystEdits || false} onChange={event => setDraft({ ...draft, allowAnalystEdits: event.target.checked })} />Allow analyst edits</label><button className="primaryButton wide" onClick={save}>Save Settings</button>{message && <div className="infoBox wide">{message}</div>}</div></section>;
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Configuration</p><h1>Admin Settings</h1></div></div><div className="panel formGrid"><label>Organization Name<input value={draft.organizationName || ''} onChange={event => setDraft({ ...draft, organizationName: event.target.value })} /></label><label>Dashboard Subtitle<input value={draft.website || ''} onChange={event => setDraft({ ...draft, website: event.target.value })} /></label><label>Email Workflow<select value={draft.inviteMode || 'draft-only'} onChange={event => setDraft({ ...draft, inviteMode: event.target.value as AdminSetting['inviteMode'] })}><option value="draft-only">Draft ICS Download</option><option value="apps-script">Apps Script Mail Queue</option></select></label><label>Calendar Location<input value={draft.defaultCalendarLocation || ''} onChange={event => setDraft({ ...draft, defaultCalendarLocation: event.target.value })} /></label><label className="checkLine wide"><input type="checkbox" checked={draft.allowAnalystEdits || false} onChange={event => setDraft({ ...draft, allowAnalystEdits: event.target.checked })} />Allow analyst edits</label><button className="primaryButton wide" onClick={save}>Save Settings</button>{message && <div className="infoBox wide">{message}</div>}</div></section>;
 }
 
 function downloadIcs(schedule: Schedule, personnel: Personnel[], settings: AdminSetting) {
@@ -665,6 +713,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('Dashboard');
   const [settings, setSettings] = useState<AdminSetting>(defaultSettings);
   const [handledActionLink, setHandledActionLink] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
   const dataEnabled = Boolean(user);
   const { personnel, products, protocols } = useReferenceData(dataEnabled);
   const schedules = useCollection<Schedule>('schedules', dataEnabled, 'start_time', 'desc');
@@ -680,7 +729,7 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     getOne<AdminSetting>('adminSettings', 'general')
-      .then(item => setSettings({ ...defaultSettings, ...(item || {}) }))
+      .then(item => setSettings({ ...defaultSettings, ...(item || {}), website: displaySiteLabel(item?.website) }))
       .catch(console.error);
   }, [user]);
 
@@ -723,9 +772,12 @@ export default function App() {
   return (
     <div className="appShell">
       <aside>
-        <div className="brand"><strong>QC Planner</strong><span>{settings.website || defaultSettings.website}</span></div>
+        <div className="brand"><strong>QC Planner</strong><span>{displaySiteLabel(settings.website)}</span></div>
         <nav>{tabs.map(([name, Icon]) => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}><Icon size={18} />{name}</button>)}</nav>
-        <button className="signOut" onClick={() => auth && signOut(auth)}><LogOut size={18} />Sign Out</button>
+        <div className="accountActions">
+          <button onClick={() => setShowPasswordModal(true)}><KeyRound size={18} />Change Password</button>
+          <button className="signOut" onClick={() => auth && signOut(auth)}><LogOut size={18} />Sign Out</button>
+        </div>
       </aside>
       <main>
         {tab === 'Dashboard' && <Dashboard schedules={schedules.items} personnel={personnel.items} settings={settings} refreshSchedules={schedules.refresh} user={user} />}
@@ -736,6 +788,7 @@ export default function App() {
         {tab === 'Personnel' && <PersonnelPage personnel={personnel.items} refreshPersonnel={personnel.refresh} />}
         {tab === 'Admin Settings' && <AdminSettingsPage settings={settings} onSaved={setSettings} />}
       </main>
+      {showPasswordModal && <ChangePasswordModal user={user} onClose={() => setShowPasswordModal(false)} />}
     </div>
   );
 }
