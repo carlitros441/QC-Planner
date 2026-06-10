@@ -252,7 +252,7 @@ aside button:hover {
 
 .metricGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 14px;
 }
 
@@ -274,6 +274,15 @@ aside button:hover {
 
 .metricCard strong {
   font-size: 2rem;
+}
+
+.metricCard small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.lotMetric strong {
+  font-size: 1.45rem;
 }
 
 .twoColumn {
@@ -430,6 +439,7 @@ aside button:hover {
 
 .recordRow,
 .compactList > div,
+.compactList > button,
 .barRow {
   display: flex;
   justify-content: space-between;
@@ -440,6 +450,29 @@ aside button:hover {
   border-radius: 8px;
   margin-bottom: 10px;
   background: #fbfcfd;
+}
+
+.interactiveRow {
+  width: 100%;
+  color: var(--ink);
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.interactiveRow:hover {
+  border-color: var(--ctmc-red);
+  box-shadow: 0 8px 20px rgba(177, 18, 38, 0.12);
+  transform: translateY(-1px);
+}
+
+.recentActivityRow > div {
+  display: grid;
+  gap: 3px;
+}
+
+.recentActivityRow span,
+.recentActivityRow small {
+  color: var(--muted);
 }
 
 .recordRow > div:first-child {
@@ -462,6 +495,11 @@ aside button:hover {
 .subPanel .inlineEdit {
   grid-template-columns: 1fr 140px auto;
   background: white;
+}
+
+.detailList {
+  display: grid;
+  gap: 10px;
 }
 
 .calendarPanel {

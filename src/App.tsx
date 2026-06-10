@@ -183,11 +183,55 @@ function FiltersBar({ schedules, personnel, filters, setFilters }: { schedules: 
   );
 }
 
-function Dashboard({ schedules, personnel, settings }: { schedules: Schedule[]; personnel: Personnel[]; settings: AdminSetting }) {
+function Dashboard({ schedules, personnel, settings, refreshSchedules, user }: { schedules: Schedule[]; personnel: Personnel[]; settings: AdminSetting; refreshSchedules: () => Promise<void>; user: User | null }) {
   const [filters, setFilters] = useState(emptyFilters);
+  const [analystDetail, setAnalystDetail] = useState<Personnel | null>(null);
+  const [detailSchedule, setDetailSchedule] = useState<Schedule | null>(null);
+  const [edit, setEdit] = useState<Schedule | null>(null);
   const filtered = filterSchedules(schedules, filters);
-  const dueSoon = filtered.filter(item => item.status !== 'Completed' && item.status !== 'Deleted' && new Date(formatDate(item.start_time)) <= new Date(Date.now() + 7 * 86400000)).length;
-  const completion = filtered.length ? Math.round((filtered.filter(item => item.status === 'Completed').length / filtered.length) * 100) : 0;
+  const activeSchedules = filtered.filter(item => item.status !== 'Deleted');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const lots = Object.values(activeSchedules.reduce<Record<string, { batch: string; product: string; harvestDay: string; schedules: Schedule[] }>>((acc, schedule) => {
+    const harvestDay = formatDate(schedule.harvest_day_zero);
+    if (!harvestDay) return acc;
+    const key = `${schedule.product_id}|${schedule.batch_number}|${harvestDay}`;
+    acc[key] = acc[key] || { batch: schedule.batch_number, product: schedule.product_name || schedule.product_id, harvestDay, schedules: [] };
+    acc[key].schedules.push(schedule);
+    return acc;
+  }, {})).map(lot => {
+    const harvest = new Date(`${lot.harvestDay}T00:00:00`);
+    return { ...lot, daysUntil: Math.ceil((harvest.getTime() - today.getTime()) / 86400000) };
+  });
+  const nextLot = lots.filter(lot => lot.daysUntil >= 0).sort((a, b) => a.daysUntil - b.daysUntil)[0];
+  const getAssigneeName = (assigneeId: string) => personnel.find(person => person.id === assigneeId)?.name || 'Unassigned';
+  const getReviewerName = (reviewerId?: string) => personnel.find(person => person.id === reviewerId)?.name || 'Unassigned';
+  const saveDashboardSchedule = async (schedule: Schedule) => {
+    const reason = window.prompt('Reason for this GMP audit trail entry:', 'Dashboard schedule update');
+    if (reason === null) return;
+    const before = await getOne<Schedule>('schedules', schedule.id);
+    await saveDoc('schedules', { ...schedule, updated_by: currentUserInfo(user) }, schedule.id);
+    await addAuditEntry(schedule.id, 'DASHBOARD_UPDATE', before, schedule, reason, currentUserInfo(user));
+    await refreshSchedules();
+    setEdit(null);
+    setDetailSchedule(schedule);
+  };
+  const analystSchedules = analystDetail ? activeSchedules.filter(item => item.assignee_id === analystDetail.id) : [];
+  const ScheduleDetails = ({ schedule }: { schedule: Schedule }) => (
+    <div className="detailsGrid">
+      <div><strong>Batch</strong><span>{schedule.batch_number}</span></div>
+      <div><strong>Harvest Day</strong><span>{formatDate(schedule.harvest_day_zero) || 'Not set'}</span></div>
+      <div><strong>Product</strong><span>{schedule.product_name || schedule.product_id}</span></div>
+      <div><strong>Protocol</strong><span>{schedule.protocol_name}</span></div>
+      <div><strong>Test</strong><span>{schedule.test_name}</span></div>
+      <div><strong>Scheduled Date</strong><span>{formatDate(schedule.start_time)}</span></div>
+      <div><strong>Analyst</strong><span>{getAssigneeName(schedule.assignee_id)}</span></div>
+      <div><strong>QC Reviewer</strong><span>{getReviewerName(schedule.reviewer_id)}</span></div>
+      <div><strong>Status</strong><StatusBadge status={schedule.status} /></div>
+      <div><strong>Progress</strong><ProgressBar schedule={schedule} /></div>
+      <div className="wide modalActions"><button className="primaryButton" onClick={() => setEdit(schedule)}>Edit Schedule</button></div>
+    </div>
+  );
 
   return (
     <section className="screen">
@@ -195,25 +239,32 @@ function Dashboard({ schedules, personnel, settings }: { schedules: Schedule[]; 
       <FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} />
       <div className="metricGrid">
         <Metric icon={<ClipboardList />} label="Visible Tests" value={filtered.length} />
-        <Metric icon={<Activity />} label="Completion" value={`${completion}%`} />
-        <Metric icon={<CalendarDays />} label="Due In 7 Days" value={dueSoon} />
         <Metric icon={<Mail />} label="Pending Invites" value={filtered.filter(item => item.email_status === 'pending').length} />
+        <div className="metricCard lotMetric">
+          <span><CalendarDays /></span>
+          <p>Next Lot Release</p>
+          <strong>{nextLot ? nextLot.batch : 'None'}</strong>
+          <small>{nextLot ? `${nextLot.product} / Harvest ${nextLot.harvestDay} / ${nextLot.daysUntil === 0 ? 'Today' : `${nextLot.daysUntil} day${nextLot.daysUntil === 1 ? '' : 's'}`}` : 'No upcoming harvest day'}</small>
+        </div>
       </div>
       <div className="twoColumn">
         <div className="panel">
           <h2>Workload by analyst</h2>
           {personnel.map(person => {
-            const count = filtered.filter(item => item.assignee_id === person.id && item.status !== 'Deleted').length;
-            return <div className="barRow" key={person.id}><span>{person.name}</span><strong>{count}</strong></div>;
+            const count = activeSchedules.filter(item => item.assignee_id === person.id).length;
+            return <button className="barRow interactiveRow" key={person.id} onClick={() => setAnalystDetail(person)}><span>{person.name}</span><strong>{count}</strong></button>;
           })}
         </div>
         <div className="panel">
           <h2>Recent schedule activity</h2>
           <div className="compactList">
-            {filtered.slice(0, 8).map(item => <div key={item.id}><strong>{item.batch_number}</strong><span>{item.test_name}</span><StatusBadge status={item.status} /></div>)}
+            {filtered.slice(0, 8).map(item => <button className="interactiveRow recentActivityRow" key={item.id} onClick={() => setDetailSchedule(item)}><div><strong>{item.batch_number}</strong><span>{item.test_name}</span><small>{formatDate(item.harvest_day_zero) || 'Harvest day not set'}</small></div><StatusBadge status={item.status} /></button>)}
           </div>
         </div>
       </div>
+      {analystDetail && <Modal title={`${analystDetail.name} Workload`} onClose={() => setAnalystDetail(null)}><div className="detailList">{analystSchedules.map(schedule => <div key={schedule.id} className="recordRow"><div><strong>{schedule.batch_number} / {schedule.test_name}</strong><span>{schedule.product_name || schedule.product_id}</span><small>Harvest {formatDate(schedule.harvest_day_zero) || 'not set'} / Scheduled {formatDate(schedule.start_time)}</small></div><div><StatusBadge status={schedule.status} /><button onClick={() => { setAnalystDetail(null); setDetailSchedule(schedule); }}>Details</button><button onClick={() => { setAnalystDetail(null); setEdit(schedule); }}>Edit</button></div></div>)}{!analystSchedules.length && <p>No active schedules for this analyst.</p>}</div></Modal>}
+      {detailSchedule && <Modal title="Schedule Details" onClose={() => setDetailSchedule(null)}><ScheduleDetails schedule={detailSchedule} /></Modal>}
+      {edit && <Modal title="Edit Schedule" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={saveDashboardSchedule} /></Modal>}
     </section>
   );
 }
@@ -255,7 +306,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
     event.preventDefault();
     setMessage('');
     if (!selectedProtocol) return;
-    if (isEm && !form.harvest_day_zero) return setMessage('Select Day 0 Harvest for EM protocols.');
+    if (!form.harvest_day_zero) return setMessage('Select Harvest Day for this lot batch.');
     const included = Object.entries(configs).filter(([, config]) => config.include);
     if (!included.length) return setMessage('Select at least one test.');
     for (const [test, config] of included) {
@@ -270,7 +321,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
           batch_number: form.batch_number,
           protocol_name: selectedProtocol.name,
           protocol_type: selectedProtocol.protocol_type || 'QC Sample Plan',
-          harvest_day_zero: isEm ? form.harvest_day_zero : '',
+          harvest_day_zero: form.harvest_day_zero,
           delta_day: isEm ? config.delta_day : null,
           test_name: testName,
           workflow_step: config.workflow_step,
@@ -305,7 +356,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
         <label>Product ID<select required value={form.product_id} onChange={event => chooseProduct(event.target.value)}><option value="">Select product</option>{products.map(product => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label>
         <label>Batch Number<input required value={form.batch_number} onChange={event => setForm({ ...form, batch_number: event.target.value })} /></label>
         <label>Protocol Name<select required disabled={!form.product_id} value={form.protocol_name} onChange={event => chooseProtocol(event.target.value)}><option value="">Select protocol</option>{options.map(protocol => <option key={protocol.id}>{protocol.name}</option>)}</select></label>
-        {isEm && <label>Day 0 Harvest<input type="date" required value={form.harvest_day_zero} onChange={event => updateHarvest(event.target.value)} /></label>}
+        <label>{isEm ? 'Day 0 Harvest' : 'Harvest Day'}<input type="date" required value={form.harvest_day_zero} onChange={event => updateHarvest(event.target.value)} /></label>
         <div className="wide">
           {Object.entries(configs).map(([testName, config]) => (
             <div className="testConfig" key={testName}>
@@ -456,7 +507,14 @@ function Schedules({ schedules, personnel, refreshSchedules, user, settings }: {
 }
 
 function ScheduleEditor({ schedule, personnel, setSchedule, onSave }: { schedule: Schedule; personnel: Personnel[]; setSchedule: (schedule: Schedule) => void; onSave: (schedule: Schedule) => void }) {
-  return <div className="formGrid"><label>Test Name<input value={schedule.test_name} onChange={event => setSchedule({ ...schedule, test_name: event.target.value })} /></label><label>Analyst<select value={schedule.assignee_id} onChange={event => setSchedule({ ...schedule, assignee_id: event.target.value, reviewer_id: schedule.reviewer_id === event.target.value ? '' : schedule.reviewer_id })}>{personnel.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label><label>QC Reviewer<select value={schedule.reviewer_id || ''} onChange={event => setSchedule({ ...schedule, reviewer_id: event.target.value })}><option value="">Select reviewer</option>{personnel.filter(person => person.id !== schedule.assignee_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label><label>Start<input type={schedule.is_all_day ? 'date' : 'datetime-local'} value={schedule.start_time} onChange={event => setSchedule({ ...schedule, start_time: event.target.value })} /></label><label>Execution Progress<input type="number" min={0} max={80} value={Math.min(schedule.progress || 0, 80)} onChange={event => setSchedule({ ...schedule, progress: Number(event.target.value) })} /></label><button className="primaryButton wide" onClick={() => onSave(schedule)}>Save Schedule</button></div>;
+  const setHarvestDay = (harvestDay: string) => {
+    setSchedule({
+      ...schedule,
+      harvest_day_zero: harvestDay,
+      start_time: schedule.protocol_type === 'EM Protocol' && schedule.delta_day !== null && schedule.delta_day !== undefined ? addDays(harvestDay, Number(schedule.delta_day || 0)) : schedule.start_time
+    });
+  };
+  return <div className="formGrid"><label>Test Name<input value={schedule.test_name} onChange={event => setSchedule({ ...schedule, test_name: event.target.value })} /></label><label>Analyst<select value={schedule.assignee_id} onChange={event => setSchedule({ ...schedule, assignee_id: event.target.value, reviewer_id: schedule.reviewer_id === event.target.value ? '' : schedule.reviewer_id })}>{personnel.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label><label>QC Reviewer<select value={schedule.reviewer_id || ''} onChange={event => setSchedule({ ...schedule, reviewer_id: event.target.value })}><option value="">Select reviewer</option>{personnel.filter(person => person.id !== schedule.assignee_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label><label>Harvest Day<input type="date" value={formatDate(schedule.harvest_day_zero)} onChange={event => setHarvestDay(event.target.value)} /></label><label>Start<input type={schedule.is_all_day ? 'date' : 'datetime-local'} value={schedule.start_time} onChange={event => setSchedule({ ...schedule, start_time: event.target.value })} /></label><label>Execution Progress<input type="number" min={0} max={80} value={Math.min(schedule.progress || 0, 80)} onChange={event => setSchedule({ ...schedule, progress: Number(event.target.value) })} /></label><button className="primaryButton wide" onClick={() => onSave(schedule)}>Save Schedule</button></div>;
 }
 
 function AuditModal({ schedule, onClose }: { schedule: Schedule; onClose: () => void }) {
@@ -670,7 +728,7 @@ export default function App() {
         <button className="signOut" onClick={() => auth && signOut(auth)}><LogOut size={18} />Sign Out</button>
       </aside>
       <main>
-        {tab === 'Dashboard' && <Dashboard schedules={schedules.items} personnel={personnel.items} settings={settings} />}
+        {tab === 'Dashboard' && <Dashboard schedules={schedules.items} personnel={personnel.items} settings={settings} refreshSchedules={schedules.refresh} user={user} />}
         {tab === 'Create Schedule' && <CreateSchedule products={products.items} protocols={protocols.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
         {tab === 'Schedules' && <Schedules schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} settings={settings} />}
         {tab === 'Calendar' && <CalendarView schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
