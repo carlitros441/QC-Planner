@@ -43,6 +43,14 @@ service cloud.firestore {
       allow read, create, update, delete: if signedIn();
     }
 
+    match /stabilityProtocols/{stabilityProtocolId} {
+      allow read, create, update, delete: if signedIn();
+    }
+
+    match /stabilityPrograms/{stabilityProgramId} {
+      allow read, create, update, delete: if signedIn();
+    }
+
     match /personnel/{personId} {
       allow read, create, update, delete: if signedIn();
     }

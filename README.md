@@ -13,6 +13,8 @@ Theme: clean quality operations dashboard
 - Product and protocol master data
 - Protocol-level QC Sample IDs copied into scheduled assay details
 - QC Sample Plan and EM Protocol sub-protocols
+- QC Stability programs with separate stability protocol builder
+- Stability time points with custom target windows and per-time-point QC tests
 - EM Protocol test delta days from Day 0 Harvest
 - Dynamic assay workflow steps per protocol
 - Main analyst, optional trainee analyst, QC reviewer, and schedule dates
@@ -20,6 +22,7 @@ Theme: clean quality operations dashboard
 - Status badges and progress tracking
 - GMP audit/history log for schedule changes
 - Email invite request queue and `.ics` draft generation
+- Weekly QC Stability reminder workflow for a `Stability Admin` personnel record
 - Admin settings page
 - Firestore security rules
 - GitHub Pages deployment workflow
@@ -30,6 +33,8 @@ Theme: clean quality operations dashboard
 ```text
 products/{productId}
 protocols/{protocolId}
+stabilityProtocols/{stabilityProtocolId}
+stabilityPrograms/{stabilityProgramId}
 personnel/{personId}
 schedules/{scheduleId}
 schedules/{scheduleId}/auditTrail/{auditId}
@@ -89,6 +94,8 @@ QC Planner supports two safe email paths:
 2. **Mail queue:** Click `Invite` to create a `mailRequests` document with `status: pending`.
 
 The mail queue can be processed by the Google Apps Script worker from the previous project, Firebase Cloud Functions if you upgrade to Blaze, or another secure server-side worker. Browser code does not store SMTP passwords.
+
+The same Google Apps Script worker can also run `sendWeeklyStabilityReminder` every Monday at 8 AM. Create an active Personnel record named `Stability Admin` with the email address that should receive the weekly stability digest. The digest includes incomplete QC Stability schedule tests within the next 30 days as high priority and within the next 90 days as upcoming low priority.
 
 ## Local Development
 

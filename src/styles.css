@@ -651,6 +651,113 @@ aside button:hover {
   color: #0b4a7a;
 }
 
+.wideModalPanel {
+  width: min(1180px, 100%);
+}
+
+.priorityBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 900;
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.priority-high {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.priority-low {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.priority-none {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.stabilityAssignmentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.stabilityAssignmentHeader h3,
+.stabilityAssignmentHeader p {
+  margin: 0;
+}
+
+.stabilityAssignmentHeader p {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.stabilityAssignmentList,
+.stabilityProtocolBuilder,
+.stabilityTests {
+  display: grid;
+  gap: 10px;
+}
+
+.stabilityAssignment {
+  display: grid;
+  grid-template-columns: 100px repeat(5, minmax(130px, 1fr));
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.stabilityAssignment button,
+.stabilityTimePoint button,
+.stabilityTestRow button {
+  min-height: 40px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #eef1f4;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.stabilityTimePoint {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.stabilityTimePointRow {
+  grid-template-columns: minmax(130px, 1fr) 110px 150px 150px auto;
+}
+
+.stabilityTestRow {
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.7fr) auto;
+  background: white;
+}
+
+.emptyState {
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
 progress {
   width: 96px;
   accent-color: var(--ctmc-red);
@@ -680,7 +787,10 @@ progress {
   .testConfig,
   .inlineEdit,
   .subPanel .inlineEdit,
-  .detailsGrid {
+  .detailsGrid,
+  .stabilityAssignment,
+  .stabilityTimePointRow,
+  .stabilityTestRow {
     grid-template-columns: 1fr;
   }
 }

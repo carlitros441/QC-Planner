@@ -56,6 +56,13 @@ export interface Schedule extends BaseDoc {
   batch_number: string;
   protocol_name: string;
   protocol_type: ProtocolType;
+  stability_program_id?: string;
+  stability_protocol_id?: string;
+  stability_time_point_id?: string;
+  stability_time_point_label?: string;
+  stability_target_date?: string;
+  stability_window_start?: string;
+  stability_window_end?: string;
   harvest_day_zero?: string;
   delta_day?: number | null;
   qc_sample_id?: string;
@@ -106,4 +113,75 @@ export interface Filters {
   product: string;
   batch: string;
   test: string;
+}
+
+export type StabilityProgramStatus = 'Draft' | 'Scheduled' | 'Completed';
+
+export interface StabilityTestTemplate {
+  id: string;
+  name: string;
+  qc_sample_id?: string;
+}
+
+export interface StabilityTimePointTemplate {
+  id: string;
+  label: string;
+  months: number;
+  window_start_offset_days: number;
+  window_end_offset_days: number;
+  tests: StabilityTestTemplate[];
+}
+
+export interface StabilityProtocol extends BaseDoc {
+  name: string;
+  description?: string;
+  time_points: StabilityTimePointTemplate[];
+}
+
+export interface StabilityAssignment {
+  id: string;
+  time_point_id: string;
+  time_point_label: string;
+  months: number;
+  target_date: string;
+  window_start: string;
+  window_end: string;
+  window_start_offset_days: number;
+  window_end_offset_days: number;
+  test_name: string;
+  qc_sample_id?: string;
+  include: boolean;
+  assignee_id: string;
+  trainee_id?: string;
+  reviewer_id: string;
+  start_time: string;
+  duration_days: number;
+  generated_schedule_id?: string;
+}
+
+export interface StabilityProgram extends BaseDoc {
+  product_id: string;
+  product_name: string;
+  batch_number: string;
+  harvest_day_zero: string;
+  protocol_id: string;
+  protocol_name: string;
+  status: StabilityProgramStatus;
+  assignments: StabilityAssignment[];
+  generated_schedule_ids?: string[];
+  created_by?: string;
+  updated_by?: string;
+  pushed_by?: string;
+  pushed_at?: unknown;
+}
+
+export interface StabilityFilters {
+  product: string;
+  batch: string;
+  protocol: string;
+  timePoint: string;
+  status: string;
+  analyst: string;
+  priority: string;
+  dueWindow: string;
 }

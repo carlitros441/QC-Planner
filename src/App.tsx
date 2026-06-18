@@ -17,13 +17,15 @@ import {
   KeyRound,
   Settings,
   ShieldCheck,
+  Timer,
   Users
 } from 'lucide-react';
 import { auth, db, hasFirebaseConfig } from './firebase';
 import { addAuditEntry, addDays, displayTimestamp, formatDate, getOne, listDocs, loadAuditTrail, removeDoc, saveDoc } from './data';
-import type { AdminSetting, AuditEntry, EmTest, Filters, Personnel, Product, Protocol, ProtocolType, Schedule, Status, WorkflowStep } from './types';
+import Stability from './Stability';
+import type { AdminSetting, AuditEntry, EmTest, Filters, Personnel, Product, Protocol, ProtocolType, Schedule, StabilityProgram, StabilityProtocol, Status, WorkflowStep } from './types';
 
-type Tab = 'Dashboard' | 'Create Schedule' | 'Schedules' | 'Calendar' | 'Products & Protocols' | 'Personnel' | 'Admin Settings';
+type Tab = 'Dashboard' | 'Create Schedule' | 'Schedules' | 'Calendar' | 'QC Stability' | 'Products & Protocols' | 'Personnel' | 'Admin Settings';
 type Draft<T> = Partial<T> & { id?: string };
 
 const emptyFilters: Filters = { status: 'All', assignee: 'All', protocol: 'All', product: 'All', batch: 'All', test: 'All' };
@@ -835,6 +837,8 @@ export default function App() {
   const dataEnabled = Boolean(user);
   const { personnel, products, protocols } = useReferenceData(dataEnabled);
   const schedules = useCollection<Schedule>('schedules', dataEnabled, 'start_time', 'desc');
+  const stabilityProtocols = useCollection<StabilityProtocol>('stabilityProtocols', dataEnabled);
+  const stabilityPrograms = useCollection<StabilityProgram>('stabilityPrograms', dataEnabled, 'updated_at', 'desc');
 
   useEffect(() => {
     if (!auth) return;
@@ -878,6 +882,7 @@ export default function App() {
     ['Create Schedule', FlaskConical],
     ['Schedules', ClipboardList],
     ['Calendar', CalendarDays],
+    ['QC Stability', Timer],
     ['Products & Protocols', Activity],
     ['Personnel', Users],
     ['Admin Settings', Settings]
@@ -902,6 +907,7 @@ export default function App() {
         {tab === 'Create Schedule' && <CreateSchedule products={products.items} protocols={protocols.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
         {tab === 'Schedules' && <Schedules schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} settings={settings} />}
         {tab === 'Calendar' && <CalendarView schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
+        {tab === 'QC Stability' && <Stability products={products.items} personnel={personnel.items} schedules={schedules.items} protocols={stabilityProtocols.items} programs={stabilityPrograms.items} refreshProtocols={stabilityProtocols.refresh} refreshPrograms={stabilityPrograms.refresh} refreshSchedules={schedules.refresh} user={user} />}
         {tab === 'Products & Protocols' && <ProductsProtocols products={products.items} protocols={protocols.items} refreshProducts={products.refresh} refreshProtocols={protocols.refresh} />}
         {tab === 'Personnel' && <PersonnelPage personnel={personnel.items} refreshPersonnel={personnel.refresh} />}
         {tab === 'Admin Settings' && <AdminSettingsPage settings={settings} onSaved={setSettings} />}
