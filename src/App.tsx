@@ -5,7 +5,6 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import listPlugin from '@fullcalendar/list';
 import interactionPlugin from '@fullcalendar/interaction';
-import { addDoc, collection } from 'firebase/firestore';
 import {
   Activity,
   CalendarDays,
@@ -20,7 +19,7 @@ import {
   Timer,
   Users
 } from 'lucide-react';
-import { auth, db, hasFirebaseConfig } from './firebase';
+import { auth, hasFirebaseConfig } from './firebase';
 import { addAuditEntry, addDays, displayTimestamp, formatDate, getOne, listDocs, loadAuditTrail, removeDoc, saveDoc } from './data';
 import Stability from './Stability';
 import type { AdminSetting, AuditEntry, EmTest, Filters, Personnel, Product, Protocol, ProtocolType, Schedule, StabilityProgram, StabilityProtocol, Status, WorkflowStep } from './types';
@@ -470,7 +469,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
   );
 }
 
-function Schedules({ schedules, personnel, refreshSchedules, user, settings }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null; settings: AdminSetting }) {
+function Schedules({ schedules, personnel, refreshSchedules, user }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null }) {
   const [filters, setFilters] = useState(emptyFilters);
   const [edit, setEdit] = useState<Schedule | null>(null);
   const [audit, setAudit] = useState<Schedule | null>(null);
@@ -549,19 +548,11 @@ function Schedules({ schedules, personnel, refreshSchedules, user, settings }: {
     await saveSchedule({ ...schedule, status: 'Completed', progress: 100, review_status: 'Completed', review_completed_at: new Date().toISOString() }, 'REVIEW_COMPLETE');
   };
 
-  const handleEmailWorkflow = async (schedule: Schedule) => {
-    if ((settings.inviteMode || 'draft-only') === 'draft-only') {
-      downloadIcs(schedule, personnel, settings);
-      const after = { ...schedule, email_status: 'drafted' as const, updated_by: currentUserInfo(user) };
-      await saveDoc('schedules', after, schedule.id);
-      await addAuditEntry(schedule.id, 'EMAIL_DRAFT_GENERATED', schedule, after, 'User generated .ics invite draft', currentUserInfo(user));
-      await refreshSchedules();
-      return;
-    }
-
-    if (!db) return;
-    await addDoc(collection(db, 'mailRequests'), { schedule_id: schedule.id, status: 'pending', requested_by: currentUserInfo(user), created_at: new Date().toISOString() });
-    await addAuditEntry(schedule.id, 'EMAIL_INVITE_REQUEST', null, { schedule_id: schedule.id, status: 'pending' }, 'User requested email invite workflow', currentUserInfo(user));
+  const sendUpdatedInvite = async (schedule: Schedule) => {
+    const latest = await getOne<Schedule>('schedules', schedule.id) || schedule;
+    const after = { ...latest, email_status: 'pending' as const, email_error: null, updated_by: currentUserInfo(user) };
+    await saveDoc('schedules', after, latest.id);
+    await addAuditEntry(latest.id, 'EMAIL_INVITE_RESEND_REQUEST', latest, after, 'User queued updated calendar invite resend from Schedules tab', currentUserInfo(user));
     await refreshSchedules();
   };
 
@@ -587,7 +578,7 @@ function Schedules({ schedules, personnel, refreshSchedules, user, settings }: {
               <td><ProgressBar schedule={schedule} /></td>
               <td><StatusBadge status={schedule.status} /></td>
               <td><EmailBadge status={schedule.email_status} /></td>
-              <td className="actions"><button onClick={() => setEdit(schedule)}>Edit</button>{schedule.status !== 'Completed' && schedule.status !== 'Pending Review' && <button onClick={() => completeTest(schedule)}>Test Complete</button>}{schedule.status === 'Pending Review' && <button onClick={() => completeReview(schedule)}>Review Complete</button>}<button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button><button onClick={() => handleEmailWorkflow(schedule)}>{settings.inviteMode === 'apps-script' ? 'Queue Invite' : 'Draft Invite'}</button><button onClick={() => setAudit(schedule)}>Audit</button></td>
+              <td className="actions"><button onClick={() => setEdit(schedule)}>Edit</button>{schedule.status !== 'Completed' && schedule.status !== 'Pending Review' && <button onClick={() => completeTest(schedule)}>Test Complete</button>}{schedule.status === 'Pending Review' && <button onClick={() => completeReview(schedule)}>Review Complete</button>}<button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button><button onClick={() => sendUpdatedInvite(schedule)}>Send Updated Invite</button><button onClick={() => setAudit(schedule)}>Audit</button></td>
             </tr>)}
           </tbody>
         </table>
@@ -616,6 +607,7 @@ function ScheduleEditor({ schedule, personnel, setSchedule, onSave }: { schedule
       <label>QC Sample ID<input value={schedule.qc_sample_id || 'Not set'} readOnly disabled /></label>
       <label>Harvest Day<input type="date" value={formatDate(schedule.harvest_day_zero)} onChange={event => setHarvestDay(event.target.value)} /></label>
       <label>Start<input type={schedule.is_all_day ? 'date' : 'datetime-local'} value={schedule.start_time} onChange={event => setSchedule({ ...schedule, start_time: event.target.value })} /></label>
+      <label>Duration Days<input type="number" min={1} step={1} value={schedule.duration_days || 1} onChange={event => setSchedule({ ...schedule, duration_days: Math.max(1, Number(event.target.value || 1)) })} /></label>
       <label>Execution Progress<input type="number" min={0} max={80} value={Math.min(schedule.progress || 0, 80)} onChange={event => setSchedule({ ...schedule, progress: Number(event.target.value) })} /></label>
       <button className="primaryButton wide" onClick={() => onSave(schedule)}>Save Schedule</button>
     </div>
@@ -701,6 +693,13 @@ function CalendarView({ schedules, personnel, refreshSchedules, user }: { schedu
     await refreshSchedules();
     setSelected(after);
   };
+  const saveDuration = async () => {
+    if (!selected) return;
+    const reason = window.prompt('Reason for updating assay duration:', 'Assay duration update');
+    if (reason === null) return;
+    const durationDays = Math.max(1, Math.round(Number(selected.duration_days || 1)));
+    await saveCalendarSchedule({ ...selected, duration_days: durationDays }, 'DURATION_UPDATE', reason);
+  };
   const markComplete = async () => {
     if (!selected) return;
     const reason = window.prompt('Reason for marking this test execution complete:', 'Testing completed');
@@ -723,7 +722,7 @@ function CalendarView({ schedules, personnel, refreshSchedules, user }: { schedu
     const nextStatus: Status = executionProgress > 0 ? 'In Progress' : 'Scheduled';
     await saveCalendarSchedule({ ...selected, progress: executionProgress, status: nextStatus }, 'PROGRESS_UPDATE', reason);
   };
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Calendar control</p><h1>QC Schedule Calendar</h1></div><select value={view} onChange={event => setView(event.target.value)}><option value="dayGridMonth">Month</option><option value="timeGridWeek">Week</option><option value="timeGridDay">Day</option><option value="listWeek">List</option></select></div><FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} /><div className="calendarPanel"><FullCalendar plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]} initialView={view} key={view} events={events} height="auto" headerToolbar={{ left: 'prev,next today', center: 'title', right: '' }} eventClick={info => setSelected(filtered.find(schedule => schedule.id === info.event.id) || null)} /></div>{selected && <Modal title="Scheduled Assay Details" onClose={() => setSelected(null)}><div className="detailsGrid"><div><strong>Test</strong><span>{selected.test_name}</span></div><div><strong>QC Sample ID</strong><span>{selected.qc_sample_id || 'Not set'}</span></div><div><strong>Batch</strong><span>{selected.batch_number}</span></div><div><strong>Product</strong><span>{selected.product_name || selected.product_id}</span></div><div><strong>Protocol</strong><span>{selected.protocol_name}</span></div><div><strong>Main Analyst</strong><span>{personnel.find(person => person.id === selected.assignee_id)?.name || 'Unassigned'}</span></div><div><strong>Trainee Analyst</strong><span>{selected.trainee_id ? personnel.find(person => person.id === selected.trainee_id)?.name || 'Unassigned' : 'None'}</span></div><div><strong>QC Reviewer</strong><span>{personnel.find(person => person.id === selected.reviewer_id)?.name || 'Unassigned'}</span></div><div><strong>Date</strong><span>{formatDate(selected.start_time)}</span></div><div><strong>Status</strong><StatusBadge status={selected.status} /></div><div className="wide"><strong>Progress</strong><ProgressBar schedule={selected} /></div><label className="wide">Execution Progress: {Math.min(selected.progress || 0, 80)}%<input type="range" min={0} max={80} step={5} value={Math.min(selected.progress || 0, 80)} onChange={event => setSelected({ ...selected, progress: Number(event.target.value) })} /></label><div className="wide modalActions"><button className="primaryButton" onClick={() => setEdit(selected)}>Edit Entry</button><button className="primaryButton" onClick={resendInvite}>Send Updated Invite</button><button className="primaryButton" onClick={saveProgress}>Save Progress</button><button className="primaryButton" onClick={markComplete}>Test Complete</button><button className="primaryButton" onClick={markReviewComplete}>Review Complete</button></div></div></Modal>}{edit && <Modal title="Edit Calendar Entry" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={saveCalendarEdit} /></Modal>}</section>;
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Calendar control</p><h1>QC Schedule Calendar</h1></div><select value={view} onChange={event => setView(event.target.value)}><option value="dayGridMonth">Month</option><option value="timeGridWeek">Week</option><option value="timeGridDay">Day</option><option value="listWeek">List</option></select></div><FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} /><div className="calendarPanel"><FullCalendar plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]} initialView={view} key={view} events={events} height="auto" headerToolbar={{ left: 'prev,next today', center: 'title', right: '' }} eventClick={info => setSelected(filtered.find(schedule => schedule.id === info.event.id) || null)} /></div>{selected && <Modal title="Scheduled Assay Details" onClose={() => setSelected(null)}><div className="detailsGrid"><div><strong>Test</strong><span>{selected.test_name}</span></div><div><strong>QC Sample ID</strong><span>{selected.qc_sample_id || 'Not set'}</span></div><div><strong>Batch</strong><span>{selected.batch_number}</span></div><div><strong>Product</strong><span>{selected.product_name || selected.product_id}</span></div><div><strong>Protocol</strong><span>{selected.protocol_name}</span></div><div><strong>Main Analyst</strong><span>{personnel.find(person => person.id === selected.assignee_id)?.name || 'Unassigned'}</span></div><div><strong>Trainee Analyst</strong><span>{selected.trainee_id ? personnel.find(person => person.id === selected.trainee_id)?.name || 'Unassigned' : 'None'}</span></div><div><strong>QC Reviewer</strong><span>{personnel.find(person => person.id === selected.reviewer_id)?.name || 'Unassigned'}</span></div><div><strong>Date</strong><span>{formatDate(selected.start_time)}</span></div><div><strong>Status</strong><StatusBadge status={selected.status} /></div><label>Duration Days<input type="number" min={1} step={1} value={selected.duration_days || 1} onChange={event => setSelected({ ...selected, duration_days: Math.max(1, Number(event.target.value || 1)) })} /></label><div className="wide"><strong>Progress</strong><ProgressBar schedule={selected} /></div><label className="wide">Execution Progress: {Math.min(selected.progress || 0, 80)}%<input type="range" min={0} max={80} step={5} value={Math.min(selected.progress || 0, 80)} onChange={event => setSelected({ ...selected, progress: Number(event.target.value) })} /></label><div className="wide modalActions"><button className="primaryButton" onClick={() => setEdit(selected)}>Edit Entry</button><button className="primaryButton" onClick={saveDuration}>Save Duration</button><button className="primaryButton" onClick={resendInvite}>Send Updated Invite</button><button className="primaryButton" onClick={saveProgress}>Save Progress</button><button className="primaryButton" onClick={markComplete}>Test Complete</button><button className="primaryButton" onClick={markReviewComplete}>Review Complete</button></div></div></Modal>}{edit && <Modal title="Edit Calendar Entry" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={saveCalendarEdit} /></Modal>}</section>;
 }
 
 function ProductsProtocols({ products, protocols, refreshProducts, refreshProtocols }: { products: Product[]; protocols: Protocol[]; refreshProducts: () => Promise<void>; refreshProtocols: () => Promise<void> }) {
@@ -837,41 +836,6 @@ function AdminSettingsPage({ settings, onSaved }: { settings: AdminSetting; onSa
   return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Configuration</p><h1>Admin Settings</h1></div></div><div className="panel formGrid"><label>Organization Name<input value={draft.organizationName || ''} onChange={event => setDraft({ ...draft, organizationName: event.target.value })} /></label><label>Dashboard Subtitle<input value={draft.website || ''} onChange={event => setDraft({ ...draft, website: event.target.value })} /></label><label>Email Workflow<select value={draft.inviteMode || 'draft-only'} onChange={event => setDraft({ ...draft, inviteMode: event.target.value as AdminSetting['inviteMode'] })}><option value="draft-only">Draft ICS Download</option><option value="apps-script">Apps Script Mail Queue</option></select></label><label>Calendar Location<input value={draft.defaultCalendarLocation || ''} onChange={event => setDraft({ ...draft, defaultCalendarLocation: event.target.value })} /></label><label className="checkLine wide"><input type="checkbox" checked={draft.allowAnalystEdits || false} onChange={event => setDraft({ ...draft, allowAnalystEdits: event.target.checked })} />Allow analyst edits</label><button className="primaryButton wide" onClick={save}>Save Settings</button>{message && <div className="infoBox wide">{message}</div>}</div></section>;
 }
 
-function downloadIcs(schedule: Schedule, personnel: Personnel[], settings: AdminSetting) {
-  const assignee = personnel.find(person => person.id === schedule.assignee_id);
-  const trainee = personnel.find(person => person.id === schedule.trainee_id);
-  const reviewer = personnel.find(person => person.id === schedule.reviewer_id);
-  const inviteTitle = `${initials(assignee?.initials || assignee?.name)}_${schedule.batch_number}_${schedule.test_name}`;
-  const start = schedule.is_all_day ? `DTSTART;VALUE=DATE:${formatDate(schedule.start_time).replace(/-/g, '')}` : `DTSTART:${new Date(schedule.start_time).toISOString().replace(/[-:]/g, '').split('.')[0]}Z`;
-  const endValue = schedule.is_all_day ? addDays(formatDate(schedule.start_time), schedule.duration_days || 1).replace(/-/g, '') : new Date(schedule.end_time || schedule.start_time).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-  const end = schedule.is_all_day ? `DTEND;VALUE=DATE:${endValue}` : `DTEND:${endValue}`;
-  const organization = settings.organizationName || defaultSettings.organizationName || 'QC Planner';
-  const location = settings.defaultCalendarLocation || defaultSettings.defaultCalendarLocation || 'QC Laboratory';
-  const description = `You have been assigned a QC test: ${schedule.test_name}
-(${schedule.protocol_name})
-Batch Number: ${schedule.batch_number}
-QC Sample ID: ${schedule.qc_sample_id || 'Not set'}
-Product: ${schedule.product_name || schedule.product_id}
-Main Analyst: ${assignee?.name || 'Unassigned'}
-Trainee Analyst: ${trainee?.name || 'None'}
-QC Reviewer: ${reviewer?.name || 'Unassigned'}`;
-  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', `PRODID:-//QC Planner//${escapeIcsText(organization)}//EN`, 'METHOD:REQUEST', 'BEGIN:VEVENT', `UID:${schedule.id}@qc-planner`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`, start, end, `SUMMARY:${escapeIcsText(inviteTitle)}`, `DESCRIPTION:${escapeIcsText(description)}`, `LOCATION:${escapeIcsText(location)}`, assignee?.email ? `ATTENDEE;CN=${escapeIcsText(assignee.name || 'QC Analyst')}:mailto:${assignee.email}` : '', trainee?.email ? `ATTENDEE;CN=${escapeIcsText(trainee.name || 'Trainee Analyst')}:mailto:${trainee.email}` : '', reviewer?.email ? `ATTENDEE;CN=${escapeIcsText(reviewer.name || 'QC Reviewer')}:mailto:${reviewer.email}` : '', 'END:VEVENT', 'END:VCALENDAR'].filter(Boolean).join('\r\n');
-  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `${inviteTitle}.ics`;
-  link.click();
-  URL.revokeObjectURL(link.href);
-}
-
-function escapeIcsText(value: string) {
-  return String(value || '')
-    .replace(/\\/g, '\\\\')
-    .replace(/,/g, '\\,')
-    .replace(/;/g, '\\;')
-    .replace(/\n/g, '\\n');
-}
-
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -950,7 +914,7 @@ export default function App() {
       <main>
         {tab === 'Dashboard' && <Dashboard schedules={schedules.items} personnel={personnel.items} settings={settings} refreshSchedules={schedules.refresh} user={user} />}
         {tab === 'Create Schedule' && <CreateSchedule products={products.items} protocols={protocols.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
-        {tab === 'Schedules' && <Schedules schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} settings={settings} />}
+        {tab === 'Schedules' && <Schedules schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
         {tab === 'Calendar' && <CalendarView schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
         {tab === 'QC Stability' && <Stability products={products.items} personnel={personnel.items} schedules={schedules.items} protocols={stabilityProtocols.items} programs={stabilityPrograms.items} refreshProtocols={stabilityProtocols.refresh} refreshPrograms={stabilityPrograms.refresh} refreshSchedules={schedules.refresh} user={user} />}
         {tab === 'Products & Protocols' && <ProductsProtocols products={products.items} protocols={protocols.items} refreshProducts={products.refresh} refreshProtocols={protocols.refresh} />}
