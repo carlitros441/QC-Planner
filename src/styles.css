@@ -568,6 +568,15 @@ aside button:hover {
   background: #fbfcfd;
 }
 
+.auditState {
+  display: grid;
+  gap: 4px;
+}
+
+.auditState span {
+  font-weight: 600;
+}
+
 .detailsGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -9,7 +9,8 @@ import {
   query,
   serverTimestamp,
   setDoc,
-  Timestamp
+  Timestamp,
+  where
 } from 'firebase/firestore';
 import { db } from './firebase';
 import type { AuditEntry } from './types';
@@ -89,8 +90,37 @@ export async function addAuditEntry(scheduleId: string, action: string, before: 
 }
 
 export async function loadAuditTrail(scheduleId: string) {
-  const snapshot = await getDocs(query(collection(requireDb(), 'schedules', scheduleId, 'auditTrail'), orderBy('timestamp', 'desc')));
-  return snapshot.docs.map(docSnap => toDoc<AuditEntry>(docSnap));
+  const database = requireDb();
+  const [nestedResult, globalResult] = await Promise.allSettled([
+    getDocs(query(collection(database, 'schedules', scheduleId, 'auditTrail'), orderBy('timestamp', 'desc'))),
+    getDocs(query(collection(database, 'auditTrail'), where('schedule_id', '==', scheduleId)))
+  ]);
+
+  if (nestedResult.status === 'rejected' && globalResult.status === 'rejected') {
+    throw nestedResult.reason;
+  }
+
+  const entries = new Map<string, AuditEntry>();
+  if (nestedResult.status === 'fulfilled') {
+    nestedResult.value.docs.forEach(docSnap => entries.set(docSnap.id, toDoc<AuditEntry>(docSnap)));
+  }
+  if (globalResult.status === 'fulfilled') {
+    globalResult.value.docs.forEach(docSnap => entries.set(docSnap.id, toDoc<AuditEntry>(docSnap)));
+  }
+
+  const timestampValue = (value: unknown) => {
+    if (value instanceof Timestamp) return value.toMillis();
+    if (value && typeof value === 'object' && 'toMillis' in value && typeof value.toMillis === 'function') {
+      return value.toMillis();
+    }
+    if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+      return value.toDate().getTime();
+    }
+    const parsed = Date.parse(String(value || ''));
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+
+  return [...entries.values()].sort((left, right) => timestampValue(right.timestamp) - timestampValue(left.timestamp));
 }
 
 export const formatDate = (value?: string) => {

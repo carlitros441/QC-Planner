@@ -613,8 +613,42 @@ function ScheduleEditor({ schedule, personnel, setSchedule, onSave }: { schedule
 
 function AuditModal({ schedule, onClose }: { schedule: Schedule; onClose: () => void }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
-  useEffect(() => { loadAuditTrail(schedule.id).then(setEntries).catch(console.error); }, [schedule.id]);
-  return <Modal title="GMP Audit Trail" onClose={onClose}><div className="auditList">{entries.map(entry => <div key={entry.id}><strong>{entry.action}</strong><span>{displayTimestamp(entry.timestamp)}</span><p>{entry.reason}</p><small>{entry.user}</small></div>)}{!entries.length && <p>No audit entries yet.</p>}</div></Modal>;
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setLoadError(false);
+    setEntries([]);
+
+    loadAuditTrail(schedule.id)
+      .then(nextEntries => {
+        if (active) setEntries(nextEntries);
+      })
+      .catch(error => {
+        console.error('Unable to load GMP audit trail:', error);
+        if (active) setLoadError(true);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [schedule.id]);
+
+  return (
+    <Modal title="GMP Audit Trail" onClose={onClose}>
+      <div className="auditList">
+        {loading && <div className="infoBox auditState" role="status"><strong>Loading GMP Audit Trail...</strong></div>}
+        {!loading && loadError && <div className="errorBox auditState" role="alert"><strong>Audit history could not be loaded.</strong><span>The schedule is still available. Close this window and try again.</span></div>}
+        {!loading && !loadError && !entries.length && <div className="infoBox auditState" role="status"><strong>No GMP Audit Trail exists for this schedule.</strong><span>This schedule may have been created before audit tracking was enabled.</span></div>}
+        {!loading && !loadError && entries.map(entry => <div key={entry.id}><strong>{entry.action || 'Schedule activity'}</strong><span>{displayTimestamp(entry.timestamp) || 'Timestamp unavailable'}</span><p>{entry.reason || 'No reason recorded.'}</p><small>{entry.user || 'User unavailable'}</small></div>)}
+      </div>
+    </Modal>
+  );
 }
 
 function CalendarView({ schedules, personnel, refreshSchedules, user }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null }) {
