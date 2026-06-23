@@ -40,6 +40,17 @@ const defaultSettings: AdminSetting = {
 };
 
 const currentUserInfo = (user: User | null) => user?.email || user?.uid || 'unknown';
+const auditDisplayText = (value: unknown, fallback: string) => {
+  if (typeof value === 'string') return value.trim() || fallback;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    for (const key of ['email', 'name', 'displayName', 'uid']) {
+      if (typeof record[key] === 'string' && record[key].trim()) return record[key].trim();
+    }
+  }
+  return fallback;
+};
 const displaySiteLabel = (value?: string) => value && !/ctmc\.com/i.test(value) ? value : defaultSettings.website || 'Quality Operations';
 const initials = (name?: string) => (name || 'NA').split(/\s+/).map(part => part[0]).join('').toUpperCase().slice(0, 3);
 const getProtocolSampleId = (protocol: Protocol | undefined, testName: string) => {
@@ -645,7 +656,7 @@ function AuditModal({ schedule, onClose }: { schedule: Schedule; onClose: () => 
         {loading && <div className="infoBox auditState" role="status"><strong>Loading GMP Audit Trail...</strong></div>}
         {!loading && loadError && <div className="errorBox auditState" role="alert"><strong>Audit history could not be loaded.</strong><span>The schedule is still available. Close this window and try again.</span></div>}
         {!loading && !loadError && !entries.length && <div className="infoBox auditState" role="status"><strong>No GMP Audit Trail exists for this schedule.</strong><span>This schedule may have been created before audit tracking was enabled.</span></div>}
-        {!loading && !loadError && entries.map(entry => <div key={entry.id}><strong>{entry.action || 'Schedule activity'}</strong><span>{displayTimestamp(entry.timestamp) || 'Timestamp unavailable'}</span><p>{entry.reason || 'No reason recorded.'}</p><small>{entry.user || 'User unavailable'}</small></div>)}
+        {!loading && !loadError && entries.map(entry => <div key={entry.id}><strong>{auditDisplayText(entry.action, 'Schedule activity')}</strong><span>{displayTimestamp(entry.timestamp) || 'Timestamp unavailable'}</span><p>{auditDisplayText(entry.reason, 'No reason recorded.')}</p><small>{auditDisplayText(entry.user, 'User unavailable')}</small></div>)}
       </div>
     </Modal>
   );
