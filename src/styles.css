@@ -641,6 +641,15 @@ aside button:hover {
   font-weight: 900;
 }
 
+.brand small {
+  display: block;
+  margin-top: 5px;
+  color: #cbd5e1;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .errorBox,
 .infoBox {
   border-radius: 6px;

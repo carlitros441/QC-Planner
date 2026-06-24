@@ -6,59 +6,137 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAdmin() {
+    function accessProfileExists() {
+      return signedIn()
+        && request.auth.token.email != null
+        && exists(/databases/$(database)/documents/accessProfiles/$(request.auth.token.email));
+    }
+
+    function accessProfile() {
+      return get(/databases/$(database)/documents/accessProfiles/$(request.auth.token.email)).data;
+    }
+
+    function activeAccess() {
+      return accessProfileExists() && accessProfile().active == true;
+    }
+
+    function hasRole(roles) {
+      return activeAccess() && accessProfile().role in roles;
+    }
+
+    function legacyAdmin() {
       return signedIn()
         && exists(/databases/$(database)/documents/adminSettings/users/records/$(request.auth.uid))
-        && get(/databases/$(database)/documents/adminSettings/users/records/$(request.auth.uid)).data.role in ['Admin', 'Manager'];
+        && get(/databases/$(database)/documents/adminSettings/users/records/$(request.auth.uid)).data.role == 'Admin';
+    }
+
+    function isAdmin() {
+      return hasRole(['Admin']) || legacyAdmin();
+    }
+
+    function isSupervisor() {
+      return hasRole(['Admin', 'Supervisor', 'Manager']) || legacyAdmin();
+    }
+
+    function isAnalyst() {
+      return hasRole(['Admin', 'Supervisor', 'Manager', 'Analyst', 'QA']) || legacyAdmin();
+    }
+
+    function isCompletionUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isAnalyst()
+        && changed.hasOnly([
+          'status',
+          'progress',
+          'review_status',
+          'test_completed_at',
+          'review_completed_at',
+          'completed_by',
+          'updated_by',
+          'updated_at'
+        ])
+        && (
+          (
+            request.resource.data.status == 'Pending Review'
+            && request.resource.data.progress == 80
+            && request.resource.data.review_status == 'Pending Review'
+          )
+          ||
+          (
+            request.resource.data.status == 'Completed'
+            && request.resource.data.progress == 100
+            && request.resource.data.review_status == 'Completed'
+          )
+        );
+    }
+
+    function isInviteUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isAnalyst()
+        && changed.hasOnly(['email_status', 'email_error', 'updated_by', 'updated_at'])
+        && request.resource.data.email_status == 'pending';
     }
 
     match /schedules/{scheduleId} {
-      allow read, create, update: if signedIn();
+      allow read: if signedIn();
+      allow create: if isSupervisor();
+      allow update: if isSupervisor() || isCompletionUpdate() || isInviteUpdate();
       allow delete: if false;
 
       match /auditTrail/{auditId} {
-        allow read, create: if signedIn();
+        allow read: if signedIn();
+        allow create: if isAnalyst();
         allow update, delete: if false;
       }
     }
 
     match /auditTrail/{auditId} {
-      allow read, create: if signedIn();
+      allow read: if signedIn();
+      allow create: if isAnalyst();
       allow update, delete: if false;
     }
 
     match /mailRequests/{mailRequestId} {
       allow read: if signedIn();
-      allow create: if signedIn()
+      allow create: if isAnalyst()
         && request.resource.data.schedule_id is string
         && request.resource.data.status == 'pending';
       allow update, delete: if false;
     }
 
     match /products/{productId} {
-      allow read, create, update, delete: if signedIn();
+      allow read: if signedIn();
+      allow create, update, delete: if isSupervisor();
     }
 
     match /protocols/{protocolId} {
-      allow read, create, update, delete: if signedIn();
+      allow read: if signedIn();
+      allow create, update, delete: if isSupervisor();
     }
 
     match /stabilityProtocols/{stabilityProtocolId} {
-      allow read, create, update, delete: if signedIn();
+      allow read: if signedIn();
+      allow create, update, delete: if isSupervisor();
     }
 
     match /stabilityPrograms/{stabilityProgramId} {
-      allow read, create, update, delete: if signedIn();
+      allow read: if signedIn();
+      allow create, update, delete: if isSupervisor();
     }
 
     match /personnel/{personId} {
-      allow read, create, update, delete: if signedIn();
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /accessProfiles/{email} {
+      allow read: if signedIn() && (request.auth.token.email == email || isAdmin());
+      allow create, update, delete: if isAdmin();
     }
 
     match /adminSettings/general {
       allow read: if signedIn();
-      allow create, update: if signedIn();
-      allow delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     match /adminSettings/{document=**} {

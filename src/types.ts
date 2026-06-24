@@ -1,6 +1,7 @@
 export type Status = 'Scheduled' | 'In Progress' | 'Pending Review' | 'Completed' | 'Deleted';
 export type ProtocolType = 'QC Sample Plan' | 'EM Protocol';
 export type Role = 'Admin' | 'Manager' | 'Supervisor' | 'QA' | 'Analyst';
+export type AccessLevel = 'Viewer' | 'Analyst' | 'Supervisor' | 'Admin';
 
 export interface BaseDoc {
   id: string;
@@ -47,6 +48,15 @@ export interface Personnel extends BaseDoc {
   email: string;
   role: Role;
   initials?: string;
+  active: boolean;
+}
+
+export interface AccessProfile extends BaseDoc {
+  email: string;
+  name: string;
+  personnel_id: string;
+  role: Role;
+  access_level: AccessLevel;
   active: boolean;
 }
 

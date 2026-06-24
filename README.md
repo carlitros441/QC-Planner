@@ -7,6 +7,7 @@ Theme: clean quality operations dashboard
 ## Features
 
 - Firebase Authentication login
+- Personnel-based role access for Analyst, Supervisor, and Admin functions
 - Signed-in user password changes
 - Google Cloud Firestore data storage
 - Dashboard with filters and summary metrics
@@ -42,7 +43,19 @@ auditTrail/{auditId}
 mailRequests/{requestId}
 adminSettings/general
 adminSettings/users/records/{uid}
+accessProfiles/{normalizedEmail}
 ```
+
+## User Roles
+
+Firebase Authentication users are matched to active Personnel records by email address.
+
+- `Analyst` and `QA`: view data, complete testing, complete QC review, view audit history, change password, and send updated invites.
+- `Supervisor` and `Manager`: Analyst permissions plus schedule/test editing, schedule creation, QC Stability management, and product/protocol management.
+- `Admin`: Supervisor permissions plus Personnel management and Admin Settings.
+- Missing or inactive Personnel profile: read-only Viewer access.
+
+Saving a Personnel record creates or updates `accessProfiles/{normalizedEmail}` for Firestore security enforcement. Existing Personnel profiles are automatically synchronized when an Admin signs in.
 
 ## Firebase Setup
 

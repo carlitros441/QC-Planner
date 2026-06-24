@@ -22,7 +22,7 @@ import {
 import { auth, hasFirebaseConfig } from './firebase';
 import { addAuditEntry, addDays, displayTimestamp, formatDate, getOne, listDocs, loadAuditTrail, removeDoc, saveDoc } from './data';
 import Stability from './Stability';
-import type { AdminSetting, AuditEntry, EmTest, Filters, Personnel, Product, Protocol, ProtocolType, Schedule, StabilityProgram, StabilityProtocol, Status, WorkflowStep } from './types';
+import type { AccessLevel, AccessProfile, AdminSetting, AuditEntry, EmTest, Filters, Personnel, Product, Protocol, ProtocolType, Role, Schedule, StabilityProgram, StabilityProtocol, Status, WorkflowStep } from './types';
 
 type Tab = 'Dashboard' | 'Create Schedule' | 'Schedules' | 'Calendar' | 'QC Stability' | 'Products & Protocols' | 'Personnel' | 'Admin Settings';
 type Draft<T> = Partial<T> & { id?: string };
@@ -39,6 +39,23 @@ const defaultSettings: AdminSetting = {
 };
 
 const currentUserInfo = (user: User | null) => user?.email || user?.uid || 'unknown';
+const normalizeEmail = (email?: string | null) => String(email || '').trim().toLowerCase();
+const accessLevelForRole = (role?: Role): AccessLevel => {
+  if (role === 'Admin') return 'Admin';
+  if (role === 'Supervisor' || role === 'Manager') return 'Supervisor';
+  if (role === 'Analyst' || role === 'QA') return 'Analyst';
+  return 'Viewer';
+};
+const accessRank: Record<AccessLevel, number> = { Viewer: 0, Analyst: 1, Supervisor: 2, Admin: 3 };
+const hasAccess = (level: AccessLevel, required: AccessLevel) => accessRank[level] >= accessRank[required];
+const accessProfilePayload = (person: Personnel): Omit<AccessProfile, 'id'> => ({
+  email: normalizeEmail(person.email),
+  name: person.name,
+  personnel_id: person.id,
+  role: person.role,
+  access_level: accessLevelForRole(person.role),
+  active: person.active !== false
+});
 const auditDisplayText = (value: unknown, fallback: string) => {
   if (typeof value === 'string') return value.trim() || fallback;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -66,9 +83,11 @@ const effectiveProgress = (schedule: Schedule) => {
 function useCollection<T>(collectionName: string, enabled: boolean, orderByField?: string, direction: 'asc' | 'desc' = 'asc') {
   const [items, setItems] = useState<T[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const refresh = async () => {
     if (!enabled) {
       setItems([]);
+      setLoaded(false);
       return;
     }
     setLoading(true);
@@ -76,16 +95,18 @@ function useCollection<T>(collectionName: string, enabled: boolean, orderByField
       setItems(await listDocs<T>(collectionName, orderByField, direction));
     } finally {
       setLoading(false);
+      setLoaded(true);
     }
   };
   useEffect(() => {
     if (!enabled) {
       setItems([]);
+      setLoaded(false);
       return;
     }
     refresh().catch(console.error);
   }, [collectionName, enabled, orderByField, direction]);
-  return { items, setItems, refresh, loading };
+  return { items, setItems, refresh, loading, loaded };
 }
 
 function useReferenceData(enabled: boolean) {
@@ -251,7 +272,7 @@ function FiltersBar({ schedules, personnel, filters, setFilters }: { schedules: 
   );
 }
 
-function Dashboard({ schedules, personnel, settings, refreshSchedules, user }: { schedules: Schedule[]; personnel: Personnel[]; settings: AdminSetting; refreshSchedules: () => Promise<void>; user: User | null }) {
+function Dashboard({ schedules, personnel, settings, refreshSchedules, user, canManageSchedules }: { schedules: Schedule[]; personnel: Personnel[]; settings: AdminSetting; refreshSchedules: () => Promise<void>; user: User | null; canManageSchedules: boolean }) {
   const [filters, setFilters] = useState(emptyFilters);
   const [analystDetail, setAnalystDetail] = useState<Personnel | null>(null);
   const [detailSchedule, setDetailSchedule] = useState<Schedule | null>(null);
@@ -284,6 +305,7 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user }: {
   const getTraineeName = (traineeId?: string) => traineeId ? personnel.find(person => person.id === traineeId)?.name || 'Unassigned' : 'None';
   const getReviewerName = (reviewerId?: string) => personnel.find(person => person.id === reviewerId)?.name || 'Unassigned';
   const saveDashboardSchedule = async (schedule: Schedule) => {
+    if (!canManageSchedules) return;
     const reason = window.prompt('Reason for this GMP audit trail entry:', 'Dashboard schedule update');
     if (reason === null) return;
     const before = await getOne<Schedule>('schedules', schedule.id);
@@ -308,7 +330,7 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user }: {
       <div><strong>QC Reviewer</strong><span>{getReviewerName(schedule.reviewer_id)}</span></div>
       <div><strong>Status</strong><StatusBadge status={schedule.status} /></div>
       <div><strong>Progress</strong><ProgressBar schedule={schedule} /></div>
-      <div className="wide modalActions"><button className="primaryButton" onClick={() => setEdit(schedule)}>Edit Schedule</button></div>
+      {canManageSchedules && <div className="wide modalActions"><button className="primaryButton" onClick={() => setEdit(schedule)}>Edit Schedule</button></div>}
     </div>
   );
 
@@ -342,8 +364,8 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user }: {
           </div>
         </div>
       </div>
-      {analystDetail && <Modal title={`${analystDetail.name} Workload`} onClose={() => setAnalystDetail(null)}><div className="detailList">{analystSchedules.map(schedule => <div key={schedule.id} className="recordRow"><div><strong>{schedule.batch_number} / {schedule.test_name}</strong><span>{schedule.product_name || schedule.product_id}</span><small>Harvest {formatDate(schedule.harvest_day_zero) || 'not set'} / Scheduled {formatDate(schedule.start_time)}</small></div><div><StatusBadge status={schedule.status} /><button onClick={() => { setAnalystDetail(null); setDetailSchedule(schedule); }}>Details</button><button onClick={() => { setAnalystDetail(null); setEdit(schedule); }}>Edit</button></div></div>)}{!analystSchedules.length && <p>No active schedules for this analyst.</p>}</div></Modal>}
-      {lotDetail && <Modal title={`${lotDetail.batch} Lot Details`} onClose={() => setLotDetail(null)}><div className="detailList">{lotDetail.schedules.map(schedule => <div key={schedule.id} className="recordRow"><div><strong>{schedule.test_name}</strong><span>{schedule.product_name || schedule.product_id}</span><small>QC Sample ID {schedule.qc_sample_id || 'not set'} / Scheduled {formatDate(schedule.start_time)}</small></div><div><StatusBadge status={schedule.status} /><button onClick={() => { setLotDetail(null); setDetailSchedule(schedule); }}>Details</button><button onClick={() => { setLotDetail(null); setEdit(schedule); }}>Edit</button></div></div>)}</div></Modal>}
+      {analystDetail && <Modal title={`${analystDetail.name} Workload`} onClose={() => setAnalystDetail(null)}><div className="detailList">{analystSchedules.map(schedule => <div key={schedule.id} className="recordRow"><div><strong>{schedule.batch_number} / {schedule.test_name}</strong><span>{schedule.product_name || schedule.product_id}</span><small>Harvest {formatDate(schedule.harvest_day_zero) || 'not set'} / Scheduled {formatDate(schedule.start_time)}</small></div><div><StatusBadge status={schedule.status} /><button onClick={() => { setAnalystDetail(null); setDetailSchedule(schedule); }}>Details</button>{canManageSchedules && <button onClick={() => { setAnalystDetail(null); setEdit(schedule); }}>Edit</button>}</div></div>)}{!analystSchedules.length && <p>No active schedules for this analyst.</p>}</div></Modal>}
+      {lotDetail && <Modal title={`${lotDetail.batch} Lot Details`} onClose={() => setLotDetail(null)}><div className="detailList">{lotDetail.schedules.map(schedule => <div key={schedule.id} className="recordRow"><div><strong>{schedule.test_name}</strong><span>{schedule.product_name || schedule.product_id}</span><small>QC Sample ID {schedule.qc_sample_id || 'not set'} / Scheduled {formatDate(schedule.start_time)}</small></div><div><StatusBadge status={schedule.status} /><button onClick={() => { setLotDetail(null); setDetailSchedule(schedule); }}>Details</button>{canManageSchedules && <button onClick={() => { setLotDetail(null); setEdit(schedule); }}>Edit</button>}</div></div>)}</div></Modal>}
       {detailSchedule && <Modal title="Schedule Details" onClose={() => setDetailSchedule(null)}><ScheduleDetails schedule={detailSchedule} /></Modal>}
       {edit && <Modal title="Edit Schedule" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={saveDashboardSchedule} /></Modal>}
     </section>
@@ -469,7 +491,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
   );
 }
 
-function Schedules({ schedules, personnel, refreshSchedules, user }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null }) {
+function Schedules({ schedules, personnel, refreshSchedules, user, canManageSchedules, canExecuteWorkflow, canSendInvites }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null; canManageSchedules: boolean; canExecuteWorkflow: boolean; canSendInvites: boolean }) {
   const [filters, setFilters] = useState(emptyFilters);
   const [edit, setEdit] = useState<Schedule | null>(null);
   const [audit, setAudit] = useState<Schedule | null>(null);
@@ -529,6 +551,7 @@ function Schedules({ schedules, personnel, refreshSchedules, user }: { schedules
   );
 
   const saveSchedule = async (schedule: Schedule, action: string) => {
+    if (!canManageSchedules && !['TEST_COMPLETE', 'REVIEW_COMPLETE'].includes(action)) return;
     const reason = window.prompt('Reason for this GMP audit trail entry:', action);
     if (reason === null) return;
     const before = await getOne<Schedule>('schedules', schedule.id);
@@ -549,6 +572,7 @@ function Schedules({ schedules, personnel, refreshSchedules, user }: { schedules
   };
 
   const sendUpdatedInvite = async (schedule: Schedule) => {
+    if (!canSendInvites) return;
     const latest = await getOne<Schedule>('schedules', schedule.id) || schedule;
     const after = { ...latest, email_status: 'pending' as const, email_error: null, updated_by: currentUserInfo(user) };
     await saveDoc('schedules', after, latest.id);
@@ -578,12 +602,12 @@ function Schedules({ schedules, personnel, refreshSchedules, user }: { schedules
               <td><ProgressBar schedule={schedule} /></td>
               <td><StatusBadge status={schedule.status} /></td>
               <td><EmailBadge status={schedule.email_status} /></td>
-              <td className="actions"><button onClick={() => setEdit(schedule)}>Edit</button>{schedule.status !== 'Completed' && schedule.status !== 'Pending Review' && <button onClick={() => completeTest(schedule)}>Test Complete</button>}{schedule.status === 'Pending Review' && <button onClick={() => completeReview(schedule)}>Review Complete</button>}<button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button><button onClick={() => sendUpdatedInvite(schedule)}>Send Updated Invite</button><button onClick={() => setAudit(schedule)}>Audit</button></td>
+              <td className="actions">{canManageSchedules && <button onClick={() => setEdit(schedule)}>Edit</button>}{canExecuteWorkflow && schedule.status !== 'Completed' && schedule.status !== 'Pending Review' && <button onClick={() => completeTest(schedule)}>Test Complete</button>}{canExecuteWorkflow && schedule.status === 'Pending Review' && <button onClick={() => completeReview(schedule)}>Review Complete</button>}{canManageSchedules && <button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button>}{canSendInvites && <button onClick={() => sendUpdatedInvite(schedule)}>Send Updated Invite</button>}<button onClick={() => setAudit(schedule)}>Audit</button></td>
             </tr>)}
           </tbody>
         </table>
       </div>
-      {edit && <Modal title="Edit Schedule" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={item => saveSchedule(item, 'UPDATE')} /></Modal>}
+      {canManageSchedules && edit && <Modal title="Edit Schedule" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={item => saveSchedule(item, 'UPDATE')} /></Modal>}
       {audit && <AuditModal schedule={audit} onClose={() => setAudit(null)} />}
     </section>
   );
@@ -654,7 +678,7 @@ function AuditModal({ schedule, onClose }: { schedule: Schedule; onClose: () => 
   );
 }
 
-function CalendarView({ schedules, personnel, refreshSchedules, user }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null }) {
+function CalendarView({ schedules, personnel, refreshSchedules, user, canManageSchedules, canExecuteWorkflow, canSendInvites }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null; canManageSchedules: boolean; canExecuteWorkflow: boolean; canSendInvites: boolean }) {
   const [filters, setFilters] = useState(emptyFilters);
   const [view, setView] = useState('dayGridMonth');
   const [selected, setSelected] = useState<Schedule | null>(null);
@@ -674,6 +698,7 @@ function CalendarView({ schedules, personnel, refreshSchedules, user }: { schedu
     setSelected(schedule);
   };
   const saveCalendarEdit = async (schedule: Schedule) => {
+    if (!canManageSchedules) return;
     const reason = window.prompt('Reason for this GMP audit trail entry:', 'Calendar details update');
     if (reason === null) return;
     const before = await getOne<Schedule>('schedules', schedule.id);
@@ -685,7 +710,7 @@ function CalendarView({ schedules, personnel, refreshSchedules, user }: { schedu
     setEdit(null);
   };
   const resendInvite = async () => {
-    if (!selected) return;
+    if (!selected || !canSendInvites) return;
     const latest = await getOne<Schedule>('schedules', selected.id) || selected;
     const after = { ...latest, email_status: 'pending' as const, email_error: null, updated_by: currentUserInfo(user) };
     await saveDoc('schedules', after, latest.id);
@@ -694,43 +719,43 @@ function CalendarView({ schedules, personnel, refreshSchedules, user }: { schedu
     setSelected(after);
   };
   const saveDuration = async () => {
-    if (!selected) return;
+    if (!selected || !canManageSchedules) return;
     const reason = window.prompt('Reason for updating assay duration:', 'Assay duration update');
     if (reason === null) return;
     const durationDays = Math.max(1, Math.round(Number(selected.duration_days || 1)));
     await saveCalendarSchedule({ ...selected, duration_days: durationDays }, 'DURATION_UPDATE', reason);
   };
   const markComplete = async () => {
-    if (!selected) return;
+    if (!selected || !canExecuteWorkflow) return;
     const reason = window.prompt('Reason for marking this test execution complete:', 'Testing completed');
     if (reason === null) return;
     const completed = { ...selected, status: 'Pending Review' as Status, progress: 80, review_status: 'Pending Review' as const, test_completed_at: new Date().toISOString(), completed_by: currentUserInfo(user) };
     await saveCalendarSchedule(completed, 'TEST_COMPLETE', reason);
   };
   const markReviewComplete = async () => {
-    if (!selected) return;
+    if (!selected || !canExecuteWorkflow) return;
     const reason = window.prompt('Reason for marking review complete:', 'QC review completed');
     if (reason === null) return;
     const completed = { ...selected, status: 'Completed' as Status, progress: 100, review_status: 'Completed' as const, review_completed_at: new Date().toISOString(), completed_by: currentUserInfo(user) };
     await saveCalendarSchedule(completed, 'REVIEW_COMPLETE', reason);
   };
   const saveProgress = async () => {
-    if (!selected) return;
+    if (!selected || !canManageSchedules) return;
     const reason = window.prompt('Reason for updating progress:', 'Progress update');
     if (reason === null) return;
     const executionProgress = Math.min(selected.progress || 0, 80);
     const nextStatus: Status = executionProgress > 0 ? 'In Progress' : 'Scheduled';
     await saveCalendarSchedule({ ...selected, progress: executionProgress, status: nextStatus }, 'PROGRESS_UPDATE', reason);
   };
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Calendar control</p><h1>QC Schedule Calendar</h1></div><select value={view} onChange={event => setView(event.target.value)}><option value="dayGridMonth">Month</option><option value="timeGridWeek">Week</option><option value="timeGridDay">Day</option><option value="listWeek">List</option></select></div><FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} /><div className="calendarPanel"><FullCalendar plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]} initialView={view} key={view} events={events} height="auto" headerToolbar={{ left: 'prev,next today', center: 'title', right: '' }} eventClick={info => setSelected(filtered.find(schedule => schedule.id === info.event.id) || null)} /></div>{selected && <Modal title="Scheduled Assay Details" onClose={() => setSelected(null)}><div className="detailsGrid"><div><strong>Test</strong><span>{selected.test_name}</span></div><div><strong>QC Sample ID</strong><span>{selected.qc_sample_id || 'Not set'}</span></div><div><strong>Batch</strong><span>{selected.batch_number}</span></div><div><strong>Product</strong><span>{selected.product_name || selected.product_id}</span></div><div><strong>Protocol</strong><span>{selected.protocol_name}</span></div><div><strong>Main Analyst</strong><span>{personnel.find(person => person.id === selected.assignee_id)?.name || 'Unassigned'}</span></div><div><strong>Trainee Analyst</strong><span>{selected.trainee_id ? personnel.find(person => person.id === selected.trainee_id)?.name || 'Unassigned' : 'None'}</span></div><div><strong>QC Reviewer</strong><span>{personnel.find(person => person.id === selected.reviewer_id)?.name || 'Unassigned'}</span></div><div><strong>Date</strong><span>{formatDate(selected.start_time)}</span></div><div><strong>Status</strong><StatusBadge status={selected.status} /></div><label>Duration Days<input type="number" min={1} step={1} value={selected.duration_days || 1} onChange={event => setSelected({ ...selected, duration_days: Math.max(1, Number(event.target.value || 1)) })} /></label><div className="wide"><strong>Progress</strong><ProgressBar schedule={selected} /></div><label className="wide">Execution Progress: {Math.min(selected.progress || 0, 80)}%<input type="range" min={0} max={80} step={5} value={Math.min(selected.progress || 0, 80)} onChange={event => setSelected({ ...selected, progress: Number(event.target.value) })} /></label><div className="wide modalActions"><button className="primaryButton" onClick={() => setEdit(selected)}>Edit Entry</button><button className="primaryButton" onClick={saveDuration}>Save Duration</button><button className="primaryButton" onClick={resendInvite}>Send Updated Invite</button><button className="primaryButton" onClick={saveProgress}>Save Progress</button><button className="primaryButton" onClick={markComplete}>Test Complete</button><button className="primaryButton" onClick={markReviewComplete}>Review Complete</button></div></div></Modal>}{edit && <Modal title="Edit Calendar Entry" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={saveCalendarEdit} /></Modal>}</section>;
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Calendar control</p><h1>QC Schedule Calendar</h1></div><select value={view} onChange={event => setView(event.target.value)}><option value="dayGridMonth">Month</option><option value="timeGridWeek">Week</option><option value="timeGridDay">Day</option><option value="listWeek">List</option></select></div><FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} /><div className="calendarPanel"><FullCalendar plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]} initialView={view} key={view} events={events} height="auto" headerToolbar={{ left: 'prev,next today', center: 'title', right: '' }} eventClick={info => setSelected(filtered.find(schedule => schedule.id === info.event.id) || null)} /></div>{selected && <Modal title="Scheduled Assay Details" onClose={() => setSelected(null)}><div className="detailsGrid"><div><strong>Test</strong><span>{selected.test_name}</span></div><div><strong>QC Sample ID</strong><span>{selected.qc_sample_id || 'Not set'}</span></div><div><strong>Batch</strong><span>{selected.batch_number}</span></div><div><strong>Product</strong><span>{selected.product_name || selected.product_id}</span></div><div><strong>Protocol</strong><span>{selected.protocol_name}</span></div><div><strong>Main Analyst</strong><span>{personnel.find(person => person.id === selected.assignee_id)?.name || 'Unassigned'}</span></div><div><strong>Trainee Analyst</strong><span>{selected.trainee_id ? personnel.find(person => person.id === selected.trainee_id)?.name || 'Unassigned' : 'None'}</span></div><div><strong>QC Reviewer</strong><span>{personnel.find(person => person.id === selected.reviewer_id)?.name || 'Unassigned'}</span></div><div><strong>Date</strong><span>{formatDate(selected.start_time)}</span></div><div><strong>Status</strong><StatusBadge status={selected.status} /></div>{canManageSchedules ? <label>Duration Days<input type="number" min={1} step={1} value={selected.duration_days || 1} onChange={event => setSelected({ ...selected, duration_days: Math.max(1, Number(event.target.value || 1)) })} /></label> : <div><strong>Duration Days</strong><span>{selected.duration_days || 1}</span></div>}<div className="wide"><strong>Progress</strong><ProgressBar schedule={selected} /></div>{canManageSchedules && <label className="wide">Execution Progress: {Math.min(selected.progress || 0, 80)}%<input type="range" min={0} max={80} step={5} value={Math.min(selected.progress || 0, 80)} onChange={event => setSelected({ ...selected, progress: Number(event.target.value) })} /></label>}<div className="wide modalActions">{canManageSchedules && <button className="primaryButton" onClick={() => setEdit(selected)}>Edit Entry</button>}{canManageSchedules && <button className="primaryButton" onClick={saveDuration}>Save Duration</button>}{canSendInvites && <button className="primaryButton" onClick={resendInvite}>Send Updated Invite</button>}{canManageSchedules && <button className="primaryButton" onClick={saveProgress}>Save Progress</button>}{canExecuteWorkflow && selected.status !== 'Completed' && selected.status !== 'Pending Review' && <button className="primaryButton" onClick={markComplete}>Test Complete</button>}{canExecuteWorkflow && selected.status === 'Pending Review' && <button className="primaryButton" onClick={markReviewComplete}>Review Complete</button>}</div></div></Modal>}{canManageSchedules && edit && <Modal title="Edit Calendar Entry" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={saveCalendarEdit} /></Modal>}</section>;
 }
 
-function ProductsProtocols({ products, protocols, refreshProducts, refreshProtocols }: { products: Product[]; protocols: Protocol[]; refreshProducts: () => Promise<void>; refreshProtocols: () => Promise<void> }) {
+function ProductsProtocols({ products, protocols, refreshProducts, refreshProtocols, canManage }: { products: Product[]; protocols: Protocol[]; refreshProducts: () => Promise<void>; refreshProtocols: () => Promise<void>; canManage: boolean }) {
   const [productEdit, setProductEdit] = useState<Draft<Product> | null>(null);
   const [protocolEdit, setProtocolEdit] = useState<Draft<Protocol> | null>(null);
-  const saveProduct = async () => { if (!productEdit?.name) return; await saveDoc('products', productEdit, productEdit.id); await refreshProducts(); setProductEdit(null); };
+  const saveProduct = async () => { if (!canManage || !productEdit?.name) return; await saveDoc('products', productEdit, productEdit.id); await refreshProducts(); setProductEdit(null); };
   const saveProtocol = async () => {
-    if (!protocolEdit?.name || !protocolEdit.product_id) return;
+    if (!canManage || !protocolEdit?.name || !protocolEdit.product_id) return;
     const product = products.find(item => item.id === protocolEdit.product_id);
     const payload = { ...protocolEdit, product_name: product?.name || protocolEdit.product_name || '', product_type: product?.name || '', protocol_type: protocolEdit.protocol_type || 'QC Sample Plan' as ProtocolType };
     if (payload.protocol_type === 'EM Protocol') {
@@ -745,7 +770,7 @@ function ProductsProtocols({ products, protocols, refreshProducts, refreshProtoc
     await refreshProtocols();
     setProtocolEdit(null);
   };
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Master data</p><h1>Products & Protocols</h1></div></div><div className="twoColumn"><div className="panel"><div className="panelHeader"><h2>Products</h2><button onClick={() => setProductEdit({ name: '', product_type: '', description: '', test_frequency: '' })}>Add Product</button></div>{products.map(product => <div className="recordRow" key={product.id}><div><strong>{product.name}</strong><span>{product.product_type}</span></div><div><button onClick={() => setProductEdit(product)}>Edit</button><button onClick={() => removeDoc('products', product.id).then(refreshProducts)}>Delete</button></div></div>)}</div><div className="panel"><div className="panelHeader"><h2>Protocols</h2><button onClick={() => setProtocolEdit({ name: '', product_id: '', product_name: '', protocol_type: 'QC Sample Plan', tests: [], test_sample_ids: {}, em_tests: [], workflow_steps: [] })}>Add Protocol</button></div>{protocols.map(protocol => <div className="recordRow" key={protocol.id}><div><strong>{protocol.name}</strong><span>{protocol.protocol_type} / {protocol.product_name}</span><small>{(protocol.em_tests?.length ? protocol.em_tests.map(test => `${test.name} Day ${test.delta_day}${test.qc_sample_id ? ` / ${test.qc_sample_id}` : ''}`) : (protocol.tests || []).map(test => `${test}${protocol.test_sample_ids?.[test] ? ` / ${protocol.test_sample_ids[test]}` : ''}`)).join(', ')}</small></div><div><button onClick={() => setProtocolEdit({ ...protocol, test_sample_ids: protocol.test_sample_ids || {}, em_tests: protocol.em_tests || [], workflow_steps: protocol.workflow_steps || [] })}>Edit</button><button onClick={() => removeDoc('protocols', protocol.id).then(refreshProtocols)}>Delete</button></div></div>)}</div></div>{productEdit && <Modal title="Product" onClose={() => setProductEdit(null)}><div className="formGrid"><label>Name<input value={productEdit.name || ''} onChange={event => setProductEdit({ ...productEdit, name: event.target.value })} /></label><label>Type<input value={productEdit.product_type || ''} onChange={event => setProductEdit({ ...productEdit, product_type: event.target.value })} /></label><label className="wide">Description<input value={productEdit.description || ''} onChange={event => setProductEdit({ ...productEdit, description: event.target.value })} /></label><button className="primaryButton wide" onClick={saveProduct}>Save Product</button></div></Modal>}{protocolEdit && <ProtocolModal protocol={protocolEdit} products={products} setProtocol={setProtocolEdit} onSave={saveProtocol} onClose={() => setProtocolEdit(null)} />}</section>;
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Master data</p><h1>Products & Protocols</h1></div></div><div className="twoColumn"><div className="panel"><div className="panelHeader"><h2>Products</h2>{canManage && <button onClick={() => setProductEdit({ name: '', product_type: '', description: '', test_frequency: '' })}>Add Product</button>}</div>{products.map(product => <div className="recordRow" key={product.id}><div><strong>{product.name}</strong><span>{product.product_type}</span></div>{canManage && <div><button onClick={() => setProductEdit(product)}>Edit</button><button onClick={() => removeDoc('products', product.id).then(refreshProducts)}>Delete</button></div>}</div>)}</div><div className="panel"><div className="panelHeader"><h2>Protocols</h2>{canManage && <button onClick={() => setProtocolEdit({ name: '', product_id: '', product_name: '', protocol_type: 'QC Sample Plan', tests: [], test_sample_ids: {}, em_tests: [], workflow_steps: [] })}>Add Protocol</button>}</div>{protocols.map(protocol => <div className="recordRow" key={protocol.id}><div><strong>{protocol.name}</strong><span>{protocol.protocol_type} / {protocol.product_name}</span><small>{(protocol.em_tests?.length ? protocol.em_tests.map(test => `${test.name} Day ${test.delta_day}${test.qc_sample_id ? ` / ${test.qc_sample_id}` : ''}`) : (protocol.tests || []).map(test => `${test}${protocol.test_sample_ids?.[test] ? ` / ${protocol.test_sample_ids[test]}` : ''}`)).join(', ')}</small></div>{canManage && <div><button onClick={() => setProtocolEdit({ ...protocol, test_sample_ids: protocol.test_sample_ids || {}, em_tests: protocol.em_tests || [], workflow_steps: protocol.workflow_steps || [] })}>Edit</button><button onClick={() => removeDoc('protocols', protocol.id).then(refreshProtocols)}>Delete</button></div>}</div>)}</div></div>{canManage && productEdit && <Modal title="Product" onClose={() => setProductEdit(null)}><div className="formGrid"><label>Name<input value={productEdit.name || ''} onChange={event => setProductEdit({ ...productEdit, name: event.target.value })} /></label><label>Type<input value={productEdit.product_type || ''} onChange={event => setProductEdit({ ...productEdit, product_type: event.target.value })} /></label><label className="wide">Description<input value={productEdit.description || ''} onChange={event => setProductEdit({ ...productEdit, description: event.target.value })} /></label><button className="primaryButton wide" onClick={saveProduct}>Save Product</button></div></Modal>}{canManage && protocolEdit && <ProtocolModal protocol={protocolEdit} products={products} setProtocol={setProtocolEdit} onSave={saveProtocol} onClose={() => setProtocolEdit(null)} />}</section>;
 }
 
 function ProtocolModal({ protocol, products, setProtocol, onSave, onClose }: { protocol: Draft<Protocol>; products: Product[]; setProtocol: (protocol: Draft<Protocol>) => void; onSave: () => void; onClose: () => void }) {
@@ -803,14 +828,26 @@ function PersonnelPage({ personnel, refreshPersonnel }: { personnel: Personnel[]
     if (!edit?.name || !edit.email) return;
     setMessage('');
     try {
-      await saveDoc('personnel', edit, edit.id);
+      const previous = edit.id ? personnel.find(person => person.id === edit.id) : undefined;
+      const cleanEmail = normalizeEmail(edit.email);
+      const personnelId = await saveDoc('personnel', { ...edit, email: cleanEmail }, edit.id);
+      const savedPerson = { ...edit, id: personnelId, email: cleanEmail } as Personnel;
+      await saveDoc('accessProfiles', accessProfilePayload(savedPerson), cleanEmail);
+      if (previous && normalizeEmail(previous.email) !== cleanEmail) {
+        await removeDoc('accessProfiles', normalizeEmail(previous.email));
+      }
       await refreshPersonnel();
       setEdit(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to save analyst.');
     }
   };
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Assignments</p><h1>Users / Analysts</h1></div><button onClick={() => { setMessage(''); setEdit({ name: '', email: '', role: 'Analyst', initials: '', active: true }); }}>Add Analyst</button></div>{message && <div className="errorBox">{message}</div>}<div className="tableWrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Initials</th><th>Status</th><th>Actions</th></tr></thead><tbody>{personnel.map(person => <tr key={person.id}><td>{person.name}</td><td>{person.email}</td><td>{person.role}</td><td>{person.initials || initials(person.name)}</td><td>{person.active ? 'Active' : 'Inactive'}</td><td><button onClick={() => setEdit(person)}>Edit</button><button onClick={() => removeDoc('personnel', person.id).then(refreshPersonnel)}>Delete</button></td></tr>)}</tbody></table></div>{edit && <Modal title="Analyst" onClose={() => setEdit(null)}><div className="formGrid"><label>Name<input value={edit.name || ''} onChange={event => setEdit({ ...edit, name: event.target.value })} /></label><label>Email<input type="email" value={edit.email || ''} onChange={event => setEdit({ ...edit, email: event.target.value })} /></label><label>Role<select value={edit.role || 'Analyst'} onChange={event => setEdit({ ...edit, role: event.target.value as Personnel['role'] })}><option>Admin</option><option>Manager</option><option>Supervisor</option><option>QA</option><option>Analyst</option></select></label><label>Initials<input value={edit.initials || ''} onChange={event => setEdit({ ...edit, initials: event.target.value.toUpperCase() })} /></label><label className="checkLine wide"><input type="checkbox" checked={edit.active !== false} onChange={event => setEdit({ ...edit, active: event.target.checked })} />Active</label><button className="primaryButton wide" onClick={save}>Save Analyst</button></div></Modal>}</section>;
+  const removePerson = async (person: Personnel) => {
+    await removeDoc('accessProfiles', normalizeEmail(person.email));
+    await removeDoc('personnel', person.id);
+    await refreshPersonnel();
+  };
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Assignments</p><h1>Users / Analysts</h1></div><button onClick={() => { setMessage(''); setEdit({ name: '', email: '', role: 'Analyst', initials: '', active: true }); }}>Add Analyst</button></div>{message && <div className="errorBox">{message}</div>}<div className="tableWrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Access Level</th><th>Initials</th><th>Status</th><th>Actions</th></tr></thead><tbody>{personnel.map(person => <tr key={person.id}><td>{person.name}</td><td>{person.email}</td><td>{person.role}</td><td>{accessLevelForRole(person.role)}</td><td>{person.initials || initials(person.name)}</td><td>{person.active ? 'Active' : 'Inactive'}</td><td><button onClick={() => setEdit(person)}>Edit</button><button onClick={() => removePerson(person)}>Delete</button></td></tr>)}</tbody></table></div>{edit && <Modal title="Analyst" onClose={() => setEdit(null)}><div className="formGrid"><label>Name<input value={edit.name || ''} onChange={event => setEdit({ ...edit, name: event.target.value })} /></label><label>Email<input type="email" value={edit.email || ''} onChange={event => setEdit({ ...edit, email: event.target.value })} /></label><label>Role<select value={edit.role || 'Analyst'} onChange={event => setEdit({ ...edit, role: event.target.value as Personnel['role'] })}><option>Admin</option><option>Manager</option><option>Supervisor</option><option>QA</option><option>Analyst</option></select></label><label>Access Level<input value={accessLevelForRole(edit.role)} disabled readOnly /></label><label>Initials<input value={edit.initials || ''} onChange={event => setEdit({ ...edit, initials: event.target.value.toUpperCase() })} /></label><label className="checkLine wide"><input type="checkbox" checked={edit.active !== false} onChange={event => setEdit({ ...edit, active: event.target.checked })} />Active</label><button className="primaryButton wide" onClick={save}>Save Analyst</button></div></Modal>}</section>;
 }
 
 function AdminSettingsPage({ settings, onSaved }: { settings: AdminSetting; onSaved: (settings: AdminSetting) => void }) {
@@ -833,7 +870,7 @@ function AdminSettingsPage({ settings, onSaved }: { settings: AdminSetting; onSa
     }
   };
 
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Configuration</p><h1>Admin Settings</h1></div></div><div className="panel formGrid"><label>Organization Name<input value={draft.organizationName || ''} onChange={event => setDraft({ ...draft, organizationName: event.target.value })} /></label><label>Dashboard Subtitle<input value={draft.website || ''} onChange={event => setDraft({ ...draft, website: event.target.value })} /></label><label>Email Workflow<select value={draft.inviteMode || 'draft-only'} onChange={event => setDraft({ ...draft, inviteMode: event.target.value as AdminSetting['inviteMode'] })}><option value="draft-only">Draft ICS Download</option><option value="apps-script">Apps Script Mail Queue</option></select></label><label>Calendar Location<input value={draft.defaultCalendarLocation || ''} onChange={event => setDraft({ ...draft, defaultCalendarLocation: event.target.value })} /></label><label className="checkLine wide"><input type="checkbox" checked={draft.allowAnalystEdits || false} onChange={event => setDraft({ ...draft, allowAnalystEdits: event.target.checked })} />Allow analyst edits</label><button className="primaryButton wide" onClick={save}>Save Settings</button>{message && <div className="infoBox wide">{message}</div>}</div></section>;
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Configuration</p><h1>Admin Settings</h1></div></div><div className="panel formGrid"><label>Organization Name<input value={draft.organizationName || ''} onChange={event => setDraft({ ...draft, organizationName: event.target.value })} /></label><label>Dashboard Subtitle<input value={draft.website || ''} onChange={event => setDraft({ ...draft, website: event.target.value })} /></label><label>Email Workflow<select value={draft.inviteMode || 'apps-script'} onChange={event => setDraft({ ...draft, inviteMode: event.target.value as AdminSetting['inviteMode'] })}><option value="apps-script">Apps Script Mail Queue</option></select></label><label>Calendar Location<input value={draft.defaultCalendarLocation || ''} onChange={event => setDraft({ ...draft, defaultCalendarLocation: event.target.value })} /></label><button className="primaryButton wide" onClick={save}>Save Settings</button>{message && <div className="infoBox wide">{message}</div>}</div></section>;
 }
 
 export default function App() {
@@ -843,11 +880,21 @@ export default function App() {
   const [settings, setSettings] = useState<AdminSetting>(defaultSettings);
   const [handledActionLink, setHandledActionLink] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [accessProfilesSyncedFor, setAccessProfilesSyncedFor] = useState('');
   const dataEnabled = Boolean(user);
   const { personnel, products, protocols } = useReferenceData(dataEnabled);
   const schedules = useCollection<Schedule>('schedules', dataEnabled, 'start_time', 'desc');
   const stabilityProtocols = useCollection<StabilityProtocol>('stabilityProtocols', dataEnabled);
   const stabilityPrograms = useCollection<StabilityProgram>('stabilityPrograms', dataEnabled, 'updated_at', 'desc');
+  const currentPersonnel = useMemo(() => {
+    const userEmail = normalizeEmail(user?.email);
+    return personnel.items.find(person => normalizeEmail(person.email) === userEmail && person.active !== false) || null;
+  }, [personnel.items, user?.email]);
+  const accessLevel = accessLevelForRole(currentPersonnel?.role);
+  const canExecuteWorkflow = hasAccess(accessLevel, 'Analyst');
+  const canManageSchedules = hasAccess(accessLevel, 'Supervisor');
+  const isAdmin = hasAccess(accessLevel, 'Admin');
+  const canSendInvites = canExecuteWorkflow;
 
   useEffect(() => {
     if (!auth) return;
@@ -865,12 +912,17 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (!user || handledActionLink) return;
+    if (!user || !personnel.loaded || handledActionLink) return;
     const params = new URLSearchParams(window.location.search);
     const scheduleId = params.get('schedule') || params.get('scheduleId');
     const action = params.get('action');
     if (!scheduleId || !['test-complete', 'review-complete'].includes(action || '')) return;
     setHandledActionLink(true);
+    if (!canExecuteWorkflow) {
+      window.alert('Your active Personnel role does not allow test or review completion.');
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return;
+    }
     getOne<Schedule>('schedules', scheduleId)
       .then(async schedule => {
         if (!schedule) throw new Error('Schedule was not found.');
@@ -884,27 +936,44 @@ export default function App() {
         window.history.replaceState({}, document.title, window.location.pathname);
       })
       .catch(error => window.alert(error instanceof Error ? error.message : 'Unable to apply email action link.'));
-  }, [user, handledActionLink]);
+  }, [user, personnel.loaded, handledActionLink, canExecuteWorkflow]);
 
-  const tabs = useMemo(() => [
-    ['Dashboard', LayoutDashboard],
-    ['Create Schedule', FlaskConical],
-    ['Schedules', ClipboardList],
-    ['Calendar', CalendarDays],
-    ['QC Stability', Timer],
-    ['Products & Protocols', Activity],
-    ['Personnel', Users],
-    ['Admin Settings', Settings]
-  ] as const, []);
+  useEffect(() => {
+    if (!user || !personnel.loaded || !isAdmin || accessProfilesSyncedFor === user.uid) return;
+    Promise.all(personnel.items.map(person => saveDoc('accessProfiles', accessProfilePayload(person), normalizeEmail(person.email))))
+      .then(() => setAccessProfilesSyncedFor(user.uid))
+      .catch(error => console.error('Unable to synchronize personnel access profiles:', error));
+  }, [user, personnel.loaded, personnel.items, isAdmin, accessProfilesSyncedFor]);
+
+  const tabs = useMemo(() => {
+    const allowed: Array<readonly [Tab, typeof LayoutDashboard]> = [
+      ['Dashboard', LayoutDashboard],
+      ['Schedules', ClipboardList],
+      ['Calendar', CalendarDays],
+      ['QC Stability', Timer],
+      ['Products & Protocols', Activity]
+    ];
+    if (canManageSchedules) allowed.splice(1, 0, ['Create Schedule', FlaskConical]);
+    if (isAdmin) {
+      allowed.push(['Personnel', Users]);
+      allowed.push(['Admin Settings', Settings]);
+    }
+    return allowed;
+  }, [canManageSchedules, isAdmin]);
+
+  useEffect(() => {
+    if (!tabs.some(([name]) => name === tab)) setTab('Dashboard');
+  }, [tabs, tab]);
 
   if (!hasFirebaseConfig) return <ConfigRequired />;
   if (!authReady) return <main className="loading">Loading QC Planner...</main>;
   if (!user) return <LoginScreen />;
+  if (!personnel.loaded) return <main className="loading">Loading your Personnel access profile...</main>;
 
   return (
     <div className="appShell">
       <aside>
-        <div className="brand"><strong>QC Planner</strong><span>{displaySiteLabel(settings.website)}</span></div>
+        <div className="brand"><strong>QC Planner</strong><span>{displaySiteLabel(settings.website)}</span><small>{currentPersonnel ? `${currentPersonnel.name} / ${accessLevel}` : 'No active Personnel profile / Viewer'}</small></div>
         <nav>{tabs.map(([name, Icon]) => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}><Icon size={18} />{name}</button>)}</nav>
         <div className="accountActions">
           <button onClick={() => setShowPasswordModal(true)}><KeyRound size={18} />Change Password</button>
@@ -912,14 +981,14 @@ export default function App() {
         </div>
       </aside>
       <main>
-        {tab === 'Dashboard' && <Dashboard schedules={schedules.items} personnel={personnel.items} settings={settings} refreshSchedules={schedules.refresh} user={user} />}
-        {tab === 'Create Schedule' && <CreateSchedule products={products.items} protocols={protocols.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
-        {tab === 'Schedules' && <Schedules schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
-        {tab === 'Calendar' && <CalendarView schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
-        {tab === 'QC Stability' && <Stability products={products.items} personnel={personnel.items} schedules={schedules.items} protocols={stabilityProtocols.items} programs={stabilityPrograms.items} refreshProtocols={stabilityProtocols.refresh} refreshPrograms={stabilityPrograms.refresh} refreshSchedules={schedules.refresh} user={user} />}
-        {tab === 'Products & Protocols' && <ProductsProtocols products={products.items} protocols={protocols.items} refreshProducts={products.refresh} refreshProtocols={protocols.refresh} />}
-        {tab === 'Personnel' && <PersonnelPage personnel={personnel.items} refreshPersonnel={personnel.refresh} />}
-        {tab === 'Admin Settings' && <AdminSettingsPage settings={settings} onSaved={setSettings} />}
+        {tab === 'Dashboard' && <Dashboard schedules={schedules.items} personnel={personnel.items} settings={settings} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} />}
+        {canManageSchedules && tab === 'Create Schedule' && <CreateSchedule products={products.items} protocols={protocols.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
+        {tab === 'Schedules' && <Schedules schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} canExecuteWorkflow={canExecuteWorkflow} canSendInvites={canSendInvites} />}
+        {tab === 'Calendar' && <CalendarView schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} canExecuteWorkflow={canExecuteWorkflow} canSendInvites={canSendInvites} />}
+        {tab === 'QC Stability' && <Stability products={products.items} personnel={personnel.items} schedules={schedules.items} protocols={stabilityProtocols.items} programs={stabilityPrograms.items} refreshProtocols={stabilityProtocols.refresh} refreshPrograms={stabilityPrograms.refresh} refreshSchedules={schedules.refresh} user={user} canManage={canManageSchedules} />}
+        {tab === 'Products & Protocols' && <ProductsProtocols products={products.items} protocols={protocols.items} refreshProducts={products.refresh} refreshProtocols={protocols.refresh} canManage={canManageSchedules} />}
+        {isAdmin && tab === 'Personnel' && <PersonnelPage personnel={personnel.items} refreshPersonnel={personnel.refresh} />}
+        {isAdmin && tab === 'Admin Settings' && <AdminSettingsPage settings={settings} onSaved={setSettings} />}
       </main>
       {showPasswordModal && <ChangePasswordModal user={user} onClose={() => setShowPasswordModal(false)} />}
     </div>

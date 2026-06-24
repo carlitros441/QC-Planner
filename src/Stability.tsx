@@ -360,7 +360,8 @@ export default function Stability({
   refreshProtocols,
   refreshPrograms,
   refreshSchedules,
-  user
+  user,
+  canManage
 }: {
   products: Product[];
   personnel: Personnel[];
@@ -371,6 +372,7 @@ export default function Stability({
   refreshPrograms: () => Promise<void>;
   refreshSchedules: () => Promise<void>;
   user: User | null;
+  canManage: boolean;
 }) {
   const [filters, setFilters] = useState<StabilityFilters>(defaultStabilityFilters);
   const [message, setMessage] = useState('');
@@ -416,6 +418,7 @@ export default function Stability({
   };
 
   const saveProtocol = async (protocol: Draft<StabilityProtocol>) => {
+    if (!canManage) return;
     const error = validateProtocol(protocol);
     if (error) return setMessage(error);
     const payload = {
@@ -449,6 +452,7 @@ export default function Stability({
   };
 
   const saveProgram = async (program: Draft<StabilityProgram>) => {
+    if (!canManage) return;
     const error = validateProgram(program);
     if (error) return setMessage(error);
     const payload = { ...program, status: program.status || 'Draft' as StabilityProgramStatus, updated_by: currentUserInfo(user) };
@@ -460,6 +464,7 @@ export default function Stability({
   };
 
   const pushProgram = async (program: Draft<StabilityProgram>) => {
+    if (!canManage) return;
     const error = validateProgram(program);
     if (error) return setMessage(error);
     const savedProgram = { ...program, status: program.status || 'Draft' as StabilityProgramStatus };
@@ -529,7 +534,7 @@ export default function Stability({
 
   return (
     <section className="screen">
-      <div className="screenHeader"><div><p className="eyebrow">Stability control</p><h1>QC Stability</h1></div><button onClick={() => setProgramEdit(emptyProgram())}>Create Stability Program</button></div>
+      <div className="screenHeader"><div><p className="eyebrow">Stability control</p><h1>QC Stability</h1></div>{canManage && <button onClick={() => setProgramEdit(emptyProgram())}>Create Stability Program</button>}</div>
       {message && <div className="infoBox">{message}</div>}
       <div className="metricGrid">
         <div className="metricCard"><span>Programs</span><p>Draft stability programs</p><strong>{programs.filter(program => program.status === 'Draft').length}</strong></div>
@@ -548,13 +553,13 @@ export default function Stability({
       </div>
       <div className="twoColumn">
         <div className="panel">
-          <div className="panelHeader"><h2>Stability Protocols</h2><button onClick={() => setProtocolEdit(emptyProtocol())}>Add Protocol</button></div>
-          {protocols.map(protocol => <div className="recordRow" key={protocol.id}><div><strong>{protocol.name}</strong><span>{protocol.time_points?.length || 0} time points</span><small>{(protocol.time_points || []).map(point => `${point.label}: ${point.tests.length} test${point.tests.length === 1 ? '' : 's'}`).join(', ')}</small></div><div><button onClick={() => setProtocolEdit(protocol)}>Edit</button><button onClick={() => removeDoc('stabilityProtocols', protocol.id).then(refreshProtocols)}>Delete</button></div></div>)}
+          <div className="panelHeader"><h2>Stability Protocols</h2>{canManage && <button onClick={() => setProtocolEdit(emptyProtocol())}>Add Protocol</button>}</div>
+          {protocols.map(protocol => <div className="recordRow" key={protocol.id}><div><strong>{protocol.name}</strong><span>{protocol.time_points?.length || 0} time points</span><small>{(protocol.time_points || []).map(point => `${point.label}: ${point.tests.length} test${point.tests.length === 1 ? '' : 's'}`).join(', ')}</small></div>{canManage && <div><button onClick={() => setProtocolEdit(protocol)}>Edit</button><button onClick={() => removeDoc('stabilityProtocols', protocol.id).then(refreshProtocols)}>Delete</button></div>}</div>)}
           {!protocols.length && <p>No stability protocols yet.</p>}
         </div>
         <div className="panel">
-          <div className="panelHeader"><h2>Programs</h2><button onClick={() => setProgramEdit(emptyProgram())}>Add Draft</button></div>
-          {programs.map(program => <div className="recordRow" key={program.id}><div><strong>{program.batch_number}</strong><span>{program.product_name} / {program.protocol_name}</span><small>Harvest {formatDate(program.harvest_day_zero)} / {program.assignments?.filter(assignment => assignment.include).length || 0} included tests</small></div><div><StabilityBadge status={program.status || 'Draft'} /><button onClick={() => setDetail(program)}>Details</button><button onClick={() => setProgramEdit(program)}>Edit</button>{program.status === 'Draft' && <button onClick={() => removeDoc('stabilityPrograms', program.id).then(refreshPrograms)}>Delete</button>}</div></div>)}
+          <div className="panelHeader"><h2>Programs</h2>{canManage && <button onClick={() => setProgramEdit(emptyProgram())}>Add Draft</button>}</div>
+          {programs.map(program => <div className="recordRow" key={program.id}><div><strong>{program.batch_number}</strong><span>{program.product_name} / {program.protocol_name}</span><small>Harvest {formatDate(program.harvest_day_zero)} / {program.assignments?.filter(assignment => assignment.include).length || 0} included tests</small></div><div><StabilityBadge status={program.status || 'Draft'} /><button onClick={() => setDetail(program)}>Details</button>{canManage && <button onClick={() => setProgramEdit(program)}>Edit</button>}{canManage && program.status === 'Draft' && <button onClick={() => removeDoc('stabilityPrograms', program.id).then(refreshPrograms)}>Delete</button>}</div></div>)}
           {!programs.length && <p>No stability programs yet.</p>}
         </div>
       </div>
@@ -577,8 +582,8 @@ export default function Stability({
           </tbody>
         </table>
       </div>
-      {protocolEdit && <Modal title="Stability Protocol" onClose={() => setProtocolEdit(null)}><ProtocolEditor protocol={protocolEdit} setProtocol={setProtocolEdit} onSave={saveProtocol} /></Modal>}
-      {programEdit && <Modal title="Stability Program Draft" onClose={() => setProgramEdit(null)}><ProgramEditor program={programEdit} products={products} protocols={protocols} personnel={personnel} setProgram={setProgramEdit} onSave={saveProgram} onPush={pushProgram} /></Modal>}
+      {canManage && protocolEdit && <Modal title="Stability Protocol" onClose={() => setProtocolEdit(null)}><ProtocolEditor protocol={protocolEdit} setProtocol={setProtocolEdit} onSave={saveProtocol} /></Modal>}
+      {canManage && programEdit && <Modal title="Stability Program Draft" onClose={() => setProgramEdit(null)}><ProgramEditor program={programEdit} products={products} protocols={protocols} personnel={personnel} setProgram={setProgramEdit} onSave={saveProgram} onPush={pushProgram} /></Modal>}
       {detail && <Modal title={`${detail.batch_number} Stability Details`} onClose={() => setDetail(null)}><div className="detailList">{(detail.assignments || []).filter(assignment => assignment.include).map(assignment => <div className="recordRow" key={assignment.id}><div><strong>{assignment.time_point_label} / {assignment.test_name}</strong><span>Target {formatDate(assignment.target_date)} / Window {formatDate(assignment.window_start)} to {formatDate(assignment.window_end)}</span><small>Main {getPersonName(assignment.assignee_id)} / Reviewer {getPersonName(assignment.reviewer_id)}</small></div><div>{assignment.generated_schedule_id ? <StabilityBadge status={schedulesById.get(assignment.generated_schedule_id)?.status || 'Scheduled'} /> : <StabilityBadge status="Draft" />}</div></div>)}</div></Modal>}
     </section>
   );
