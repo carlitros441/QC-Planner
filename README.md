@@ -48,7 +48,7 @@ accessProfiles/{normalizedEmail}
 
 ## User Roles
 
-Firebase Authentication users are matched to active Personnel records by email address.
+Firebase Authentication users are matched to active Personnel records by the first email address in the Personnel email field. Additional comma- or semicolon-separated addresses remain available for invite delivery.
 
 - `Analyst` and `QA`: view data, complete testing, complete QC review, view audit history, change password, and send updated invites.
 - `Supervisor` and `Manager`: Analyst permissions plus schedule/test editing, schedule creation, QC Stability management, and product/protocol management.

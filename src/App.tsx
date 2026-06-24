@@ -39,7 +39,7 @@ const defaultSettings: AdminSetting = {
 };
 
 const currentUserInfo = (user: User | null) => user?.email || user?.uid || 'unknown';
-const normalizeEmail = (email?: string | null) => String(email || '').trim().toLowerCase();
+const normalizeEmail = (email?: string | null) => String(email || '').split(/[;,]/)[0].trim().toLowerCase();
 const accessLevelForRole = (role?: Role): AccessLevel => {
   if (role === 'Admin') return 'Admin';
   if (role === 'Supervisor' || role === 'Manager') return 'Supervisor';
@@ -844,13 +844,14 @@ function PersonnelPage({ personnel, refreshPersonnel }: { personnel: Personnel[]
     try {
       const previous = edit.id ? personnel.find(person => person.id === edit.id) : undefined;
       const cleanEmail = normalizeEmail(edit.email);
+      const deliveryEmail = String(edit.email).trim();
       const duplicate = personnel.find(person => person.id !== edit.id && normalizeEmail(person.email) === cleanEmail);
       if (duplicate) {
         setMessage(`Email ${cleanEmail} is already assigned to ${duplicate.name}. Each login email must belong to one Personnel profile.`);
         return;
       }
-      const personnelId = await saveDoc('personnel', { ...edit, email: cleanEmail }, edit.id);
-      const savedPerson = { ...edit, id: personnelId, email: cleanEmail } as Personnel;
+      const personnelId = await saveDoc('personnel', { ...edit, email: deliveryEmail }, edit.id);
+      const savedPerson = { ...edit, id: personnelId, email: deliveryEmail } as Personnel;
       await saveDoc('accessProfiles', accessProfilePayload(savedPerson), cleanEmail);
       if (previous && normalizeEmail(previous.email) !== cleanEmail) {
         await removeDoc('accessProfiles', normalizeEmail(previous.email));
