@@ -56,6 +56,20 @@ const accessProfilePayload = (person: Personnel): Omit<AccessProfile, 'id'> => (
   access_level: accessLevelForRole(person.role),
   active: person.active !== false
 });
+const preferredPersonnelByEmail = (people: Personnel[]) => {
+  const profiles = new Map<string, Personnel>();
+  people.forEach(person => {
+    const email = normalizeEmail(person.email);
+    if (!email) return;
+    const current = profiles.get(email);
+    const currentActive = current?.active !== false;
+    const nextActive = person.active !== false;
+    if (!current || (nextActive && !currentActive) || (nextActive === currentActive && accessRank[accessLevelForRole(person.role)] > accessRank[accessLevelForRole(current.role)])) {
+      profiles.set(email, person);
+    }
+  });
+  return [...profiles.values()];
+};
 const auditDisplayText = (value: unknown, fallback: string) => {
   if (typeof value === 'string') return value.trim() || fallback;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -830,6 +844,11 @@ function PersonnelPage({ personnel, refreshPersonnel }: { personnel: Personnel[]
     try {
       const previous = edit.id ? personnel.find(person => person.id === edit.id) : undefined;
       const cleanEmail = normalizeEmail(edit.email);
+      const duplicate = personnel.find(person => person.id !== edit.id && normalizeEmail(person.email) === cleanEmail);
+      if (duplicate) {
+        setMessage(`Email ${cleanEmail} is already assigned to ${duplicate.name}. Each login email must belong to one Personnel profile.`);
+        return;
+      }
       const personnelId = await saveDoc('personnel', { ...edit, email: cleanEmail }, edit.id);
       const savedPerson = { ...edit, id: personnelId, email: cleanEmail } as Personnel;
       await saveDoc('accessProfiles', accessProfilePayload(savedPerson), cleanEmail);
@@ -888,7 +907,7 @@ export default function App() {
   const stabilityPrograms = useCollection<StabilityProgram>('stabilityPrograms', dataEnabled, 'updated_at', 'desc');
   const currentPersonnel = useMemo(() => {
     const userEmail = normalizeEmail(user?.email);
-    return personnel.items.find(person => normalizeEmail(person.email) === userEmail && person.active !== false) || null;
+    return preferredPersonnelByEmail(personnel.items.filter(person => normalizeEmail(person.email) === userEmail && person.active !== false))[0] || null;
   }, [personnel.items, user?.email]);
   const accessLevel = accessLevelForRole(currentPersonnel?.role);
   const canExecuteWorkflow = hasAccess(accessLevel, 'Analyst');
@@ -940,7 +959,7 @@ export default function App() {
 
   useEffect(() => {
     if (!user || !personnel.loaded || !isAdmin || accessProfilesSyncedFor === user.uid) return;
-    Promise.all(personnel.items.map(person => saveDoc('accessProfiles', accessProfilePayload(person), normalizeEmail(person.email))))
+    Promise.all(preferredPersonnelByEmail(personnel.items).map(person => saveDoc('accessProfiles', accessProfilePayload(person), normalizeEmail(person.email))))
       .then(() => setAccessProfilesSyncedFor(user.uid))
       .catch(error => console.error('Unable to synchronize personnel access profiles:', error));
   }, [user, personnel.loaded, personnel.items, isAdmin, accessProfilesSyncedFor]);
