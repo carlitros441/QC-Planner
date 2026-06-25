@@ -14,6 +14,7 @@ import {
   LogOut,
   Mail,
   KeyRound,
+  Package,
   Settings,
   ShieldCheck,
   Timer,
@@ -21,17 +22,18 @@ import {
 } from 'lucide-react';
 import { auth, hasFirebaseConfig } from './firebase';
 import { addAuditEntry, addDays, displayTimestamp, formatDate, getOne, listDocs, loadAuditTrail, removeDoc, saveDoc } from './data';
+import LabResources, { AssayResourcesModal } from './LabResources';
 import Stability from './Stability';
-import type { AccessLevel, AccessProfile, AdminSetting, AuditEntry, EmTest, Filters, Personnel, Product, Protocol, ProtocolType, Role, Schedule, StabilityProgram, StabilityProtocol, Status, WorkflowStep } from './types';
+import type { AccessLevel, AccessProfile, AdminSetting, AssayResourceUsage, AuditEntry, EmTest, Filters, LabResource, Personnel, Product, Protocol, ProtocolType, Role, Schedule, StabilityProgram, StabilityProtocol, Status, WorkflowStep } from './types';
 
-type Tab = 'Dashboard' | 'Create Schedule' | 'Schedules' | 'Calendar' | 'QC Stability' | 'Products & Protocols' | 'Personnel' | 'Admin Settings';
+type Tab = 'Dashboard' | 'Create Schedule' | 'Schedules' | 'Calendar' | 'QC Stability' | 'Lab Inventory' | 'Products & Protocols' | 'Personnel' | 'Admin Settings';
 type Draft<T> = Partial<T> & { id?: string };
 
 const emptyFilters: Filters = { status: 'All', assignee: 'All', protocol: 'All', product: 'All', batch: 'All', test: 'All' };
 const statusOrder: Status[] = ['Scheduled', 'In Progress', 'Pending Review', 'Completed', 'Deleted'];
 const defaultSettings: AdminSetting = {
   id: 'general',
-  organizationName: 'CTMC',
+  organizationName: 'QC Planner',
   website: 'Quality Operations',
   inviteMode: 'draft-only',
   defaultCalendarLocation: 'QC Laboratory',
@@ -81,7 +83,7 @@ const auditDisplayText = (value: unknown, fallback: string) => {
   }
   return fallback;
 };
-const displaySiteLabel = (value?: string) => value && !/ctmc\.com/i.test(value) ? value : defaultSettings.website || 'Quality Operations';
+const displaySiteLabel = (value?: string) => value && !/^(https?:\/\/|www\.)/i.test(value) ? value : defaultSettings.website || 'Quality Operations';
 const initials = (name?: string) => (name || 'NA').split(/\s+/).map(part => part[0]).join('').toUpperCase().slice(0, 3);
 const getProtocolSampleId = (protocol: Protocol | undefined, testName: string) => {
   if (!protocol || !testName) return '';
@@ -286,7 +288,7 @@ function FiltersBar({ schedules, personnel, filters, setFilters }: { schedules: 
   );
 }
 
-function Dashboard({ schedules, personnel, settings, refreshSchedules, user, canManageSchedules, canExecuteWorkflow }: { schedules: Schedule[]; personnel: Personnel[]; settings: AdminSetting; refreshSchedules: () => Promise<void>; user: User | null; canManageSchedules: boolean; canExecuteWorkflow: boolean }) {
+function Dashboard({ schedules, personnel, settings, refreshSchedules, user, canManageSchedules, canExecuteWorkflow, onOpenResources }: { schedules: Schedule[]; personnel: Personnel[]; settings: AdminSetting; refreshSchedules: () => Promise<void>; user: User | null; canManageSchedules: boolean; canExecuteWorkflow: boolean; onOpenResources: (schedule: Schedule) => void }) {
   const [filters, setFilters] = useState(emptyFilters);
   const [analystDetail, setAnalystDetail] = useState<Personnel | null>(null);
   const [detailSchedule, setDetailSchedule] = useState<Schedule | null>(null);
@@ -368,7 +370,7 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user, can
       <div><strong>QC Reviewer</strong><span>{getReviewerName(schedule.reviewer_id)}</span></div>
       <div><strong>Status</strong><StatusBadge status={schedule.status} /></div>
       <div><strong>Progress</strong><ProgressBar schedule={schedule} /></div>
-      <div className="wide modalActions">{canManageSchedules && <button className="primaryButton" onClick={() => setEdit(schedule)}>Edit Schedule</button>}<WorkflowButtons schedule={schedule} /></div>
+      <div className="wide modalActions"><button className="primaryButton" onClick={() => { setDetailSchedule(null); onOpenResources(schedule); }}>Resources</button>{canManageSchedules && <button className="primaryButton" onClick={() => setEdit(schedule)}>Edit Schedule</button>}<WorkflowButtons schedule={schedule} /></div>
     </div>
   );
 
@@ -402,8 +404,8 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user, can
           </div>
         </div>
       </div>
-      {analystDetail && <Modal title={`${analystDetail.name} Workload`} onClose={() => setAnalystDetail(null)}><div className="detailList">{analystSchedules.map(schedule => <div key={schedule.id} className="recordRow"><div><strong>{schedule.batch_number} / {schedule.test_name}</strong><span>{schedule.product_name || schedule.product_id}</span><small>Harvest {formatDate(schedule.harvest_day_zero) || 'not set'} / Scheduled {formatDate(schedule.start_time)}</small></div><div><StatusBadge status={schedule.status} /><button onClick={() => { setAnalystDetail(null); setDetailSchedule(schedule); }}>Details</button><WorkflowButtons schedule={schedule} />{canManageSchedules && <button onClick={() => { setAnalystDetail(null); setEdit(schedule); }}>Edit</button>}</div></div>)}{!analystSchedules.length && <p>No active schedules for this analyst.</p>}</div></Modal>}
-      {lotDetail && <Modal title={`${lotDetail.batch} Lot Details`} onClose={() => setLotDetail(null)}><div className="detailList">{lotDetail.schedules.map(schedule => <div key={schedule.id} className="recordRow"><div><strong>{schedule.test_name}</strong><span>{schedule.product_name || schedule.product_id}</span><small>QC Sample ID {schedule.qc_sample_id || 'not set'} / Scheduled {formatDate(schedule.start_time)}</small></div><div><StatusBadge status={schedule.status} /><button onClick={() => { setLotDetail(null); setDetailSchedule(schedule); }}>Details</button><WorkflowButtons schedule={schedule} />{canManageSchedules && <button onClick={() => { setLotDetail(null); setEdit(schedule); }}>Edit</button>}</div></div>)}</div></Modal>}
+      {analystDetail && <Modal title={`${analystDetail.name} Workload`} onClose={() => setAnalystDetail(null)}><div className="detailList">{analystSchedules.map(schedule => <div key={schedule.id} className="recordRow"><div><strong>{schedule.batch_number} / {schedule.test_name}</strong><span>{schedule.product_name || schedule.product_id}</span><small>Harvest {formatDate(schedule.harvest_day_zero) || 'not set'} / Scheduled {formatDate(schedule.start_time)}</small></div><div><StatusBadge status={schedule.status} /><button onClick={() => { setAnalystDetail(null); setDetailSchedule(schedule); }}>Details</button><button onClick={() => { setAnalystDetail(null); onOpenResources(schedule); }}>Resources</button><WorkflowButtons schedule={schedule} />{canManageSchedules && <button onClick={() => { setAnalystDetail(null); setEdit(schedule); }}>Edit</button>}</div></div>)}{!analystSchedules.length && <p>No active schedules for this analyst.</p>}</div></Modal>}
+      {lotDetail && <Modal title={`${lotDetail.batch} Lot Details`} onClose={() => setLotDetail(null)}><div className="detailList">{lotDetail.schedules.map(schedule => <div key={schedule.id} className="recordRow"><div><strong>{schedule.test_name}</strong><span>{schedule.product_name || schedule.product_id}</span><small>QC Sample ID {schedule.qc_sample_id || 'not set'} / Scheduled {formatDate(schedule.start_time)}</small></div><div><StatusBadge status={schedule.status} /><button onClick={() => { setLotDetail(null); setDetailSchedule(schedule); }}>Details</button><button onClick={() => { setLotDetail(null); onOpenResources(schedule); }}>Resources</button><WorkflowButtons schedule={schedule} />{canManageSchedules && <button onClick={() => { setLotDetail(null); setEdit(schedule); }}>Edit</button>}</div></div>)}</div></Modal>}
       {detailSchedule && <Modal title="Schedule Details" onClose={() => setDetailSchedule(null)}><ScheduleDetails schedule={detailSchedule} /></Modal>}
       {edit && <Modal title="Edit Schedule" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={saveDashboardSchedule} /></Modal>}
     </section>
@@ -529,7 +531,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
   );
 }
 
-function Schedules({ schedules, personnel, refreshSchedules, user, canManageSchedules, canExecuteWorkflow, canSendInvites }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null; canManageSchedules: boolean; canExecuteWorkflow: boolean; canSendInvites: boolean }) {
+function Schedules({ schedules, personnel, refreshSchedules, user, canManageSchedules, canExecuteWorkflow, canSendInvites, onOpenResources }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null; canManageSchedules: boolean; canExecuteWorkflow: boolean; canSendInvites: boolean; onOpenResources: (schedule: Schedule) => void }) {
   const [filters, setFilters] = useState(emptyFilters);
   const [edit, setEdit] = useState<Schedule | null>(null);
   const [audit, setAudit] = useState<Schedule | null>(null);
@@ -640,7 +642,7 @@ function Schedules({ schedules, personnel, refreshSchedules, user, canManageSche
               <td><ProgressBar schedule={schedule} /></td>
               <td><StatusBadge status={schedule.status} /></td>
               <td><EmailBadge status={schedule.email_status} /></td>
-              <td className="actions">{canManageSchedules && <button onClick={() => setEdit(schedule)}>Edit</button>}{canExecuteWorkflow && ['Scheduled', 'In Progress'].includes(schedule.status) && <button onClick={() => completeTest(schedule)}>Test Complete</button>}{canExecuteWorkflow && schedule.status === 'Pending Review' && <button onClick={() => completeReview(schedule)}>Review Complete</button>}{canManageSchedules && <button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button>}{canSendInvites && <button onClick={() => sendUpdatedInvite(schedule)}>Send Updated Invite</button>}<button onClick={() => setAudit(schedule)}>Audit</button></td>
+              <td className="actions">{canManageSchedules && <button onClick={() => setEdit(schedule)}>Edit</button>}<button onClick={() => onOpenResources(schedule)}>Resources</button>{canExecuteWorkflow && ['Scheduled', 'In Progress'].includes(schedule.status) && <button onClick={() => completeTest(schedule)}>Test Complete</button>}{canExecuteWorkflow && schedule.status === 'Pending Review' && <button onClick={() => completeReview(schedule)}>Review Complete</button>}{canManageSchedules && <button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button>}{canSendInvites && <button onClick={() => sendUpdatedInvite(schedule)}>Send Updated Invite</button>}<button onClick={() => setAudit(schedule)}>Audit</button></td>
             </tr>)}
           </tbody>
         </table>
@@ -716,7 +718,7 @@ function AuditModal({ schedule, onClose }: { schedule: Schedule; onClose: () => 
   );
 }
 
-function CalendarView({ schedules, personnel, refreshSchedules, user, canManageSchedules, canExecuteWorkflow, canSendInvites }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null; canManageSchedules: boolean; canExecuteWorkflow: boolean; canSendInvites: boolean }) {
+function CalendarView({ schedules, personnel, refreshSchedules, user, canManageSchedules, canExecuteWorkflow, canSendInvites, onOpenResources }: { schedules: Schedule[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null; canManageSchedules: boolean; canExecuteWorkflow: boolean; canSendInvites: boolean; onOpenResources: (schedule: Schedule) => void }) {
   const [filters, setFilters] = useState(emptyFilters);
   const [view, setView] = useState('dayGridMonth');
   const [selected, setSelected] = useState<Schedule | null>(null);
@@ -785,7 +787,7 @@ function CalendarView({ schedules, personnel, refreshSchedules, user, canManageS
     const nextStatus: Status = executionProgress > 0 ? 'In Progress' : 'Scheduled';
     await saveCalendarSchedule({ ...selected, progress: executionProgress, status: nextStatus }, 'PROGRESS_UPDATE', reason);
   };
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Calendar control</p><h1>QC Schedule Calendar</h1></div><select value={view} onChange={event => setView(event.target.value)}><option value="dayGridMonth">Month</option><option value="timeGridWeek">Week</option><option value="timeGridDay">Day</option><option value="listWeek">List</option></select></div><FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} /><div className="calendarPanel"><FullCalendar plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]} initialView={view} key={view} events={events} height="auto" headerToolbar={{ left: 'prev,next today', center: 'title', right: '' }} eventClick={info => setSelected(filtered.find(schedule => schedule.id === info.event.id) || null)} /></div>{selected && <Modal title="Scheduled Assay Details" onClose={() => setSelected(null)}><div className="detailsGrid"><div><strong>Test</strong><span>{selected.test_name}</span></div><div><strong>QC Sample ID</strong><span>{selected.qc_sample_id || 'Not set'}</span></div><div><strong>Batch</strong><span>{selected.batch_number}</span></div><div><strong>Product</strong><span>{selected.product_name || selected.product_id}</span></div><div><strong>Protocol</strong><span>{selected.protocol_name}</span></div><div><strong>Main Analyst</strong><span>{personnel.find(person => person.id === selected.assignee_id)?.name || 'Unassigned'}</span></div><div><strong>Trainee Analyst</strong><span>{selected.trainee_id ? personnel.find(person => person.id === selected.trainee_id)?.name || 'Unassigned' : 'None'}</span></div><div><strong>QC Reviewer</strong><span>{personnel.find(person => person.id === selected.reviewer_id)?.name || 'Unassigned'}</span></div><div><strong>Date</strong><span>{formatDate(selected.start_time)}</span></div><div><strong>Status</strong><StatusBadge status={selected.status} /></div>{canManageSchedules ? <label>Duration Days<input type="number" min={1} step={1} value={selected.duration_days || 1} onChange={event => setSelected({ ...selected, duration_days: Math.max(1, Number(event.target.value || 1)) })} /></label> : <div><strong>Duration Days</strong><span>{selected.duration_days || 1}</span></div>}<div className="wide"><strong>Progress</strong><ProgressBar schedule={selected} /></div>{canManageSchedules && <label className="wide">Execution Progress: {Math.min(selected.progress || 0, 80)}%<input type="range" min={0} max={80} step={5} value={Math.min(selected.progress || 0, 80)} onChange={event => setSelected({ ...selected, progress: Number(event.target.value) })} /></label>}<div className="wide modalActions">{canManageSchedules && <button className="primaryButton" onClick={() => setEdit(selected)}>Edit Entry</button>}{canManageSchedules && <button className="primaryButton" onClick={saveDuration}>Save Duration</button>}{canSendInvites && <button className="primaryButton" onClick={resendInvite}>Send Updated Invite</button>}{canManageSchedules && <button className="primaryButton" onClick={saveProgress}>Save Progress</button>}{canExecuteWorkflow && selected.status !== 'Completed' && selected.status !== 'Pending Review' && <button className="primaryButton" onClick={markComplete}>Test Complete</button>}{canExecuteWorkflow && selected.status === 'Pending Review' && <button className="primaryButton" onClick={markReviewComplete}>Review Complete</button>}</div></div></Modal>}{canManageSchedules && edit && <Modal title="Edit Calendar Entry" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={saveCalendarEdit} /></Modal>}</section>;
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Calendar control</p><h1>QC Schedule Calendar</h1></div><select value={view} onChange={event => setView(event.target.value)}><option value="dayGridMonth">Month</option><option value="timeGridWeek">Week</option><option value="timeGridDay">Day</option><option value="listWeek">List</option></select></div><FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} /><div className="calendarPanel"><FullCalendar plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]} initialView={view} key={view} events={events} height="auto" headerToolbar={{ left: 'prev,next today', center: 'title', right: '' }} eventClick={info => setSelected(filtered.find(schedule => schedule.id === info.event.id) || null)} /></div>{selected && <Modal title="Scheduled Assay Details" onClose={() => setSelected(null)}><div className="detailsGrid"><div><strong>Test</strong><span>{selected.test_name}</span></div><div><strong>QC Sample ID</strong><span>{selected.qc_sample_id || 'Not set'}</span></div><div><strong>Batch</strong><span>{selected.batch_number}</span></div><div><strong>Product</strong><span>{selected.product_name || selected.product_id}</span></div><div><strong>Protocol</strong><span>{selected.protocol_name}</span></div><div><strong>Main Analyst</strong><span>{personnel.find(person => person.id === selected.assignee_id)?.name || 'Unassigned'}</span></div><div><strong>Trainee Analyst</strong><span>{selected.trainee_id ? personnel.find(person => person.id === selected.trainee_id)?.name || 'Unassigned' : 'None'}</span></div><div><strong>QC Reviewer</strong><span>{personnel.find(person => person.id === selected.reviewer_id)?.name || 'Unassigned'}</span></div><div><strong>Date</strong><span>{formatDate(selected.start_time)}</span></div><div><strong>Status</strong><StatusBadge status={selected.status} /></div>{canManageSchedules ? <label>Duration Days<input type="number" min={1} step={1} value={selected.duration_days || 1} onChange={event => setSelected({ ...selected, duration_days: Math.max(1, Number(event.target.value || 1)) })} /></label> : <div><strong>Duration Days</strong><span>{selected.duration_days || 1}</span></div>}<div className="wide"><strong>Progress</strong><ProgressBar schedule={selected} /></div>{canManageSchedules && <label className="wide">Execution Progress: {Math.min(selected.progress || 0, 80)}%<input type="range" min={0} max={80} step={5} value={Math.min(selected.progress || 0, 80)} onChange={event => setSelected({ ...selected, progress: Number(event.target.value) })} /></label>}<div className="wide modalActions"><button className="primaryButton" onClick={() => { setSelected(null); onOpenResources(selected); }}>Resources</button>{canManageSchedules && <button className="primaryButton" onClick={() => setEdit(selected)}>Edit Entry</button>}{canManageSchedules && <button className="primaryButton" onClick={saveDuration}>Save Duration</button>}{canSendInvites && <button className="primaryButton" onClick={resendInvite}>Send Updated Invite</button>}{canManageSchedules && <button className="primaryButton" onClick={saveProgress}>Save Progress</button>}{canExecuteWorkflow && selected.status !== 'Completed' && selected.status !== 'Pending Review' && <button className="primaryButton" onClick={markComplete}>Test Complete</button>}{canExecuteWorkflow && selected.status === 'Pending Review' && <button className="primaryButton" onClick={markReviewComplete}>Review Complete</button>}</div></div></Modal>}{canManageSchedules && edit && <Modal title="Edit Calendar Entry" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={saveCalendarEdit} /></Modal>}</section>;
 }
 
 function ProductsProtocols({ products, protocols, refreshProducts, refreshProtocols, canManage }: { products: Product[]; protocols: Protocol[]; refreshProducts: () => Promise<void>; refreshProtocols: () => Promise<void>; canManage: boolean }) {
@@ -927,12 +929,15 @@ export default function App() {
   const [settings, setSettings] = useState<AdminSetting>(defaultSettings);
   const [handledActionLink, setHandledActionLink] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [resourceSchedule, setResourceSchedule] = useState<Schedule | null>(null);
   const [accessProfilesSyncedFor, setAccessProfilesSyncedFor] = useState('');
   const dataEnabled = Boolean(user);
   const { personnel, products, protocols } = useReferenceData(dataEnabled);
   const schedules = useCollection<Schedule>('schedules', dataEnabled, 'start_time', 'desc');
   const stabilityProtocols = useCollection<StabilityProtocol>('stabilityProtocols', dataEnabled);
   const stabilityPrograms = useCollection<StabilityProgram>('stabilityPrograms', dataEnabled, 'updated_at', 'desc');
+  const labResources = useCollection<LabResource>('labResources', dataEnabled);
+  const resourceUsages = useCollection<AssayResourceUsage>('assayResourceUsage', dataEnabled, 'used_at', 'desc');
   const currentPersonnel = useMemo(() => {
     const userEmail = normalizeEmail(user?.email);
     return preferredPersonnelByEmail(personnel.items.filter(person => normalizeEmail(person.email) === userEmail && person.active !== false))[0] || null;
@@ -998,6 +1003,7 @@ export default function App() {
       ['Schedules', ClipboardList],
       ['Calendar', CalendarDays],
       ['QC Stability', Timer],
+      ['Lab Inventory', Package],
       ['Products & Protocols', Activity]
     ];
     if (canManageSchedules) allowed.splice(1, 0, ['Create Schedule', FlaskConical]);
@@ -1028,16 +1034,18 @@ export default function App() {
         </div>
       </aside>
       <main>
-        {tab === 'Dashboard' && <Dashboard schedules={schedules.items} personnel={personnel.items} settings={settings} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} canExecuteWorkflow={canExecuteWorkflow} />}
+        {tab === 'Dashboard' && <Dashboard schedules={schedules.items} personnel={personnel.items} settings={settings} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} canExecuteWorkflow={canExecuteWorkflow} onOpenResources={setResourceSchedule} />}
         {canManageSchedules && tab === 'Create Schedule' && <CreateSchedule products={products.items} protocols={protocols.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
-        {tab === 'Schedules' && <Schedules schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} canExecuteWorkflow={canExecuteWorkflow} canSendInvites={canSendInvites} />}
-        {tab === 'Calendar' && <CalendarView schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} canExecuteWorkflow={canExecuteWorkflow} canSendInvites={canSendInvites} />}
+        {tab === 'Schedules' && <Schedules schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} canExecuteWorkflow={canExecuteWorkflow} canSendInvites={canSendInvites} onOpenResources={setResourceSchedule} />}
+        {tab === 'Calendar' && <CalendarView schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} canExecuteWorkflow={canExecuteWorkflow} canSendInvites={canSendInvites} onOpenResources={setResourceSchedule} />}
         {tab === 'QC Stability' && <Stability products={products.items} personnel={personnel.items} schedules={schedules.items} protocols={stabilityProtocols.items} programs={stabilityPrograms.items} refreshProtocols={stabilityProtocols.refresh} refreshPrograms={stabilityPrograms.refresh} refreshSchedules={schedules.refresh} user={user} canManage={canManageSchedules} />}
+        {tab === 'Lab Inventory' && <LabResources resources={labResources.items} usages={resourceUsages.items} schedules={schedules.items} personnel={personnel.items} refreshResources={labResources.refresh} refreshUsages={resourceUsages.refresh} user={user} canManage={canManageSchedules} />}
         {tab === 'Products & Protocols' && <ProductsProtocols products={products.items} protocols={protocols.items} refreshProducts={products.refresh} refreshProtocols={protocols.refresh} canManage={canManageSchedules} />}
         {isAdmin && tab === 'Personnel' && <PersonnelPage personnel={personnel.items} refreshPersonnel={personnel.refresh} />}
         {isAdmin && tab === 'Admin Settings' && <AdminSettingsPage settings={settings} onSaved={setSettings} />}
       </main>
       {showPasswordModal && <ChangePasswordModal user={user} onClose={() => setShowPasswordModal(false)} />}
+      {resourceSchedule && <AssayResourcesModal schedule={resourceSchedule} resources={labResources.items} usages={resourceUsages.items} refreshUsages={resourceUsages.refresh} user={user} canLog={canExecuteWorkflow} canManage={canManageSchedules} onClose={() => setResourceSchedule(null)} />}
     </div>
   );
 }

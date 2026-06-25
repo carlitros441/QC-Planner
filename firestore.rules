@@ -124,6 +124,42 @@ service cloud.firestore {
       allow create, update, delete: if isSupervisor();
     }
 
+    match /labResources/{resourceId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isSupervisor();
+    }
+
+    match /assayResourceUsage/{usageId} {
+      allow read: if signedIn();
+      allow create: if isAnalyst()
+        && request.resource.data.schedule_id is string
+        && request.resource.data.resource_id is string
+        && request.resource.data.resource_type in ['Material', 'Reagent', 'Equipment']
+        && request.resource.data.quantity is number
+        && request.resource.data.quantity > 0
+        && request.resource.data.used_at is string
+        && request.resource.data.used_by is string
+        && request.resource.data.status == 'Active'
+        && exists(/databases/$(database)/documents/schedules/$(request.resource.data.schedule_id))
+        && exists(/databases/$(database)/documents/labResources/$(request.resource.data.resource_id))
+        && get(/databases/$(database)/documents/labResources/$(request.resource.data.resource_id)).data.active == true
+        && get(/databases/$(database)/documents/labResources/$(request.resource.data.resource_id)).data.type == request.resource.data.resource_type;
+      allow update: if isSupervisor()
+        && resource.data.status == 'Active'
+        && request.resource.data.status == 'Voided'
+        && request.resource.data.void_reason is string
+        && request.resource.data.voided_at is string
+        && request.resource.data.voided_by is string
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'void_reason',
+          'voided_at',
+          'voided_by',
+          'updated_at'
+        ]);
+      allow delete: if false;
+    }
+
     match /personnel/{personId} {
       allow read: if signedIn();
       allow create, update, delete: if isAdmin();

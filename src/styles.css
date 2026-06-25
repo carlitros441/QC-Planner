@@ -1,8 +1,8 @@
 :root {
   color-scheme: light;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --ctmc-red: #b11226;
-  --ctmc-red-dark: #841627;
+  --brand-red: #b11226;
+  --brand-red-dark: #841627;
   --ink: #263238;
   --muted: #64707a;
   --line: #d8dee4;
@@ -144,7 +144,7 @@ aside button {
 
 aside button.active,
 aside button:hover {
-  background: var(--ctmc-red);
+  background: var(--brand-red);
   color: white;
 }
 
@@ -161,7 +161,7 @@ aside button:hover {
 
 .brand span,
 .eyebrow {
-  color: var(--ctmc-red);
+  color: var(--brand-red);
   font-weight: 900;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -207,7 +207,7 @@ aside button:hover {
 .calendarPanel {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-top: 4px solid var(--ctmc-red);
+  border-top: 4px solid var(--brand-red);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(35, 45, 55, 0.07);
 }
@@ -246,7 +246,7 @@ aside button:hover {
   min-height: 44px;
   border-radius: 6px;
   padding: 10px 16px;
-  background: var(--ctmc-red);
+  background: var(--brand-red);
   color: white;
   font-weight: 900;
 }
@@ -269,7 +269,7 @@ aside button:hover {
 }
 
 .metricCard span {
-  color: var(--ctmc-red);
+  color: var(--brand-red);
 }
 
 .metricCard p {
@@ -369,7 +369,7 @@ aside button:hover {
 }
 
 .mail-failed {
-  background: var(--ctmc-red);
+  background: var(--brand-red);
 }
 
 .mail-pending,
@@ -402,7 +402,7 @@ aside button:hover {
 }
 
 .progressExecution {
-  background: var(--ctmc-red);
+  background: var(--brand-red);
 }
 
 .progressReview {
@@ -468,7 +468,7 @@ aside button:hover {
 }
 
 .interactiveRow:hover {
-  border-color: var(--ctmc-red);
+  border-color: var(--brand-red);
   box-shadow: 0 8px 20px rgba(177, 18, 38, 0.12);
   transform: translateY(-1px);
 }
@@ -600,7 +600,7 @@ aside button:hover {
 
 .detailsGrid input[type="range"] {
   padding: 0;
-  accent-color: var(--ctmc-red);
+  accent-color: var(--brand-red);
 }
 
 .modalActions {
@@ -637,7 +637,7 @@ aside button:hover {
 }
 
 .brandMark {
-  color: var(--ctmc-red);
+  color: var(--brand-red);
   font-weight: 900;
 }
 
@@ -660,7 +660,7 @@ aside button:hover {
 .errorBox {
   background: #fff0f1;
   border: 1px solid #ffcdd2;
-  color: var(--ctmc-red-dark);
+  color: var(--brand-red-dark);
 }
 
 .infoBox {
@@ -776,9 +776,88 @@ aside button:hover {
   font-weight: 800;
 }
 
+.resourceBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.resource-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.resource-warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.resource-overdue {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.resource-inactive {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.resourceFilters {
+  grid-template-columns: 180px 180px minmax(240px, 1fr);
+}
+
+.resourceAssayHeader,
+.resourceSelectionSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resourceAssayHeader {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.resourceAssayHeader div,
+.resourceSelectionSummary {
+  display: grid;
+  gap: 3px;
+}
+
+.resourceAssayHeader span,
+.resourceSelectionSummary span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.resourceUsageForm {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.6fr) minmax(170px, 0.8fr) minmax(150px, 0.7fr) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.resourceUsageForm .errorBox {
+  grid-column: 1 / -1;
+}
+
 progress {
   width: 96px;
-  accent-color: var(--ctmc-red);
+  accent-color: var(--brand-red);
 }
 
 @media (max-width: 980px) {
@@ -808,7 +887,14 @@ progress {
   .detailsGrid,
   .stabilityAssignment,
   .stabilityTimePointRow,
-  .stabilityTestRow {
+  .stabilityTestRow,
+  .resourceFilters,
+  .resourceUsageForm {
     grid-template-columns: 1fr;
+  }
+
+  .resourceAssayHeader {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

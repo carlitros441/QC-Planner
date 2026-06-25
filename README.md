@@ -16,6 +16,9 @@ Theme: clean quality operations dashboard
 - QC Sample Plan and EM Protocol sub-protocols
 - QC Stability programs with separate stability protocol builder
 - Stability time points with custom target windows and per-time-point QC tests
+- Laboratory materials and reagent lot inventory with expiration and minimum-stock monitoring
+- Equipment inventory with calibration due-date monitoring
+- Assay-level material, reagent, and equipment usage with GMP audit entries
 - EM Protocol test delta days from Day 0 Harvest
 - Dynamic assay workflow steps per protocol
 - Main analyst, optional trainee analyst, QC reviewer, and schedule dates
@@ -36,6 +39,8 @@ products/{productId}
 protocols/{protocolId}
 stabilityProtocols/{stabilityProtocolId}
 stabilityPrograms/{stabilityProgramId}
+labResources/{resourceId}
+assayResourceUsage/{usageId}
 personnel/{personId}
 schedules/{scheduleId}
 schedules/{scheduleId}/auditTrail/{auditId}

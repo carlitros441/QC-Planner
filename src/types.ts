@@ -98,6 +98,45 @@ export interface Schedule extends BaseDoc {
   deleted_by?: string;
 }
 
+export type LabResourceType = 'Material' | 'Reagent' | 'Equipment';
+
+export interface LabResource extends BaseDoc {
+  type: LabResourceType;
+  name: string;
+  catalog_number?: string;
+  lot_number?: string;
+  vendor?: string;
+  location?: string;
+  unit?: string;
+  quantity_received?: number;
+  minimum_quantity?: number;
+  expiration_date?: string;
+  equipment_id?: string;
+  calibration_due_date?: string;
+  notes?: string;
+  active: boolean;
+  created_by?: string;
+  updated_by?: string;
+}
+
+export interface AssayResourceUsage extends BaseDoc {
+  schedule_id: string;
+  resource_id: string;
+  resource_name: string;
+  resource_type: LabResourceType;
+  quantity: number;
+  unit?: string;
+  lot_number?: string;
+  equipment_id?: string;
+  used_at: string;
+  used_by: string;
+  notes?: string;
+  status: 'Active' | 'Voided';
+  void_reason?: string;
+  voided_at?: string;
+  voided_by?: string;
+}
+
 export interface AuditEntry extends BaseDoc {
   schedule_id: string;
   action: string;
