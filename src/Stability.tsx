@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { User } from 'firebase/auth';
 import { addAuditEntry, addDays, formatDate, removeDoc, saveDoc } from './data';
+import { normalizeRequirements, ResourceRequirementEditor } from './LabResources';
 import type {
+  LabResource,
   Personnel,
   Product,
   Schedule,
@@ -106,6 +108,7 @@ function buildAssignments(protocol: StabilityProtocol, harvestDay: string): Stab
       window_end_offset_days: Number(timePoint.window_end_offset_days ?? 15),
       test_name: test.name,
       qc_sample_id: test.qc_sample_id || '',
+      resource_requirements: (test.resource_requirements || []).map(requirement => ({ ...requirement, id: crypto.randomUUID() })),
       include: true,
       assignee_id: '',
       trainee_id: '',
@@ -169,6 +172,7 @@ function ProgramEditor({
   protocols,
   products,
   personnel,
+  resources,
   setProgram,
   onSave,
   onPush
@@ -177,6 +181,7 @@ function ProgramEditor({
   protocols: StabilityProtocol[];
   products: Product[];
   personnel: Personnel[];
+  resources: LabResource[];
   setProgram: (program: Draft<StabilityProgram>) => void;
   onSave: (program: Draft<StabilityProgram>) => Promise<void>;
   onPush: (program: Draft<StabilityProgram>) => Promise<void>;
@@ -229,6 +234,7 @@ function ProgramEditor({
           window_end_offset_days: 15,
           test_name: '',
           qc_sample_id: '',
+          resource_requirements: [],
           include: true,
           assignee_id: '',
           trainee_id: '',
@@ -274,6 +280,10 @@ function ProgramEditor({
             <label>Scheduled Date<input disabled={!assignment.include} required={assignment.include} min={assignment.window_start} max={assignment.window_end} type="date" value={formatDate(assignment.start_time)} onChange={event => setAssignment(assignment.id, { start_time: event.target.value })} /></label>
             <label>Duration<input type="number" min={1} value={assignment.duration_days || 1} onChange={event => setAssignment(assignment.id, { duration_days: Number(event.target.value || 1) })} /></label>
             <button type="button" onClick={() => removeAssignment(assignment.id)}>Remove</button>
+            <div className="wide assignmentResourcePlan">
+              <strong>Materials, Reagents & Equipment</strong>
+              <ResourceRequirementEditor requirements={assignment.resource_requirements || []} resources={resources} onChange={requirements => setAssignment(assignment.id, { resource_requirements: requirements })} compact />
+            </div>
           </div>
         ))}
         {!assignments.length && <p className="emptyState">Select a protocol and harvest day to build a draft stability plan.</p>}
@@ -286,10 +296,12 @@ function ProgramEditor({
 
 function ProtocolEditor({
   protocol,
+  resources,
   setProtocol,
   onSave
 }: {
   protocol: Draft<StabilityProtocol>;
+  resources: LabResource[];
   setProtocol: (protocol: Draft<StabilityProtocol>) => void;
   onSave: (protocol: Draft<StabilityProtocol>) => Promise<void>;
 }) {
@@ -315,7 +327,7 @@ function ProtocolEditor({
   });
   const addTest = (timePointId: string) => setProtocol({
     ...protocol,
-    time_points: timePoints.map(point => point.id === timePointId ? { ...point, tests: [...(point.tests || []), { id: crypto.randomUUID(), name: '', qc_sample_id: '' }] } : point)
+    time_points: timePoints.map(point => point.id === timePointId ? { ...point, tests: [...(point.tests || []), { id: crypto.randomUUID(), name: '', qc_sample_id: '', resource_requirements: [] }] } : point)
   });
 
   return (
@@ -340,7 +352,7 @@ function ProtocolEditor({
               <button type="button" onClick={() => setProtocol({ ...protocol, time_points: timePoints.filter(item => item.id !== point.id) })}>Remove</button>
             </div>
             <div className="stabilityTests">
-              {(point.tests || []).map(test => <div className="inlineEdit stabilityTestRow" key={test.id}><input placeholder="QC test name" value={test.name} onChange={event => setTest(point.id, test.id, { name: event.target.value })} /><input placeholder="QC Sample ID" value={test.qc_sample_id || ''} onChange={event => setTest(point.id, test.id, { qc_sample_id: event.target.value })} /><button type="button" onClick={() => setTimePoint(point.id, { tests: (point.tests || []).filter(item => item.id !== test.id) })}>Remove Test</button></div>)}
+              {(point.tests || []).map(test => <div className="testRequirementBlock" key={test.id}><div className="inlineEdit stabilityTestRow"><input placeholder="QC test name" value={test.name} onChange={event => setTest(point.id, test.id, { name: event.target.value })} /><input placeholder="QC Sample ID" value={test.qc_sample_id || ''} onChange={event => setTest(point.id, test.id, { qc_sample_id: event.target.value })} /><button type="button" onClick={() => setTimePoint(point.id, { tests: (point.tests || []).filter(item => item.id !== test.id) })}>Remove Test</button></div><ResourceRequirementEditor requirements={test.resource_requirements || []} resources={resources} onChange={requirements => setTest(point.id, test.id, { resource_requirements: requirements })} compact /></div>)}
               <button type="button" onClick={() => addTest(point.id)}>Add Test To {point.label || 'Time Point'}</button>
             </div>
           </div>
@@ -354,6 +366,7 @@ function ProtocolEditor({
 export default function Stability({
   products,
   personnel,
+  resources,
   schedules,
   protocols,
   programs,
@@ -365,6 +378,7 @@ export default function Stability({
 }: {
   products: Product[];
   personnel: Personnel[];
+  resources: LabResource[];
   schedules: Schedule[];
   protocols: StabilityProtocol[];
   programs: StabilityProgram[];
@@ -425,7 +439,7 @@ export default function Stability({
       ...protocol,
       time_points: (protocol.time_points || []).map(point => ({
         ...point,
-        tests: (point.tests || []).map(test => ({ ...test, name: test.name.trim(), qc_sample_id: test.qc_sample_id?.trim() || '' })).filter(test => test.name)
+        tests: (point.tests || []).map(test => ({ ...test, name: test.name.trim(), qc_sample_id: test.qc_sample_id?.trim() || '', resource_requirements: normalizeRequirements(test.resource_requirements, resources) })).filter(test => test.name)
       }))
     };
     await saveDoc('stabilityProtocols', payload, protocol.id);
@@ -455,7 +469,7 @@ export default function Stability({
     if (!canManage) return;
     const error = validateProgram(program);
     if (error) return setMessage(error);
-    const payload = { ...program, status: program.status || 'Draft' as StabilityProgramStatus, updated_by: currentUserInfo(user) };
+    const payload = { ...program, assignments: (program.assignments || []).map(assignment => ({ ...assignment, resource_requirements: normalizeRequirements(assignment.resource_requirements, resources) })), status: program.status || 'Draft' as StabilityProgramStatus, updated_by: currentUserInfo(user) };
     if (!program.id) payload.created_by = currentUserInfo(user);
     const id = await saveDoc('stabilityPrograms', payload, program.id);
     await refreshPrograms();
@@ -467,7 +481,7 @@ export default function Stability({
     if (!canManage) return;
     const error = validateProgram(program);
     if (error) return setMessage(error);
-    const savedProgram = { ...program, status: program.status || 'Draft' as StabilityProgramStatus };
+    const savedProgram = { ...program, assignments: (program.assignments || []).map(assignment => ({ ...assignment, resource_requirements: normalizeRequirements(assignment.resource_requirements, resources) })), status: program.status || 'Draft' as StabilityProgramStatus };
     let programId = savedProgram.id;
     if (!programId) {
       programId = await saveDoc('stabilityPrograms', { ...savedProgram, created_by: currentUserInfo(user), updated_by: currentUserInfo(user) });
@@ -506,6 +520,7 @@ export default function Stability({
         status: 'Scheduled',
         progress: 0,
         review_status: 'Not Ready',
+        resource_requirements: normalizeRequirements(assignment.resource_requirements, resources),
         email_status: 'pending',
         created_by: currentUserInfo(user)
       };
@@ -582,8 +597,8 @@ export default function Stability({
           </tbody>
         </table>
       </div>
-      {canManage && protocolEdit && <Modal title="Stability Protocol" onClose={() => setProtocolEdit(null)}><ProtocolEditor protocol={protocolEdit} setProtocol={setProtocolEdit} onSave={saveProtocol} /></Modal>}
-      {canManage && programEdit && <Modal title="Stability Program Draft" onClose={() => setProgramEdit(null)}><ProgramEditor program={programEdit} products={products} protocols={protocols} personnel={personnel} setProgram={setProgramEdit} onSave={saveProgram} onPush={pushProgram} /></Modal>}
+      {canManage && protocolEdit && <Modal title="Stability Protocol" onClose={() => setProtocolEdit(null)}><ProtocolEditor protocol={protocolEdit} resources={resources} setProtocol={setProtocolEdit} onSave={saveProtocol} /></Modal>}
+      {canManage && programEdit && <Modal title="Stability Program Draft" onClose={() => setProgramEdit(null)}><ProgramEditor program={programEdit} products={products} protocols={protocols} personnel={personnel} resources={resources} setProgram={setProgramEdit} onSave={saveProgram} onPush={pushProgram} /></Modal>}
       {detail && <Modal title={`${detail.batch_number} Stability Details`} onClose={() => setDetail(null)}><div className="detailList">{(detail.assignments || []).filter(assignment => assignment.include).map(assignment => <div className="recordRow" key={assignment.id}><div><strong>{assignment.time_point_label} / {assignment.test_name}</strong><span>Target {formatDate(assignment.target_date)} / Window {formatDate(assignment.window_start)} to {formatDate(assignment.window_end)}</span><small>Main {getPersonName(assignment.assignee_id)} / Reviewer {getPersonName(assignment.reviewer_id)}</small></div><div>{assignment.generated_schedule_id ? <StabilityBadge status={schedulesById.get(assignment.generated_schedule_id)?.status || 'Scheduled'} /> : <StabilityBadge status="Draft" />}</div></div>)}</div></Modal>}
     </section>
   );

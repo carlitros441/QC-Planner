@@ -513,6 +513,15 @@ aside button:hover {
   grid-template-columns: minmax(180px, 1fr) 120px minmax(150px, 0.8fr) auto;
 }
 
+.testRequirementBlock {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
 .detailList {
   display: grid;
   gap: 10px;
@@ -811,6 +820,10 @@ aside button:hover {
   grid-template-columns: 180px 180px minmax(240px, 1fr);
 }
 
+.assayResourceFilters {
+  grid-template-columns: 150px 170px 190px minmax(240px, 1fr);
+}
+
 .resourceAssayHeader,
 .resourceSelectionSummary {
   display: flex;
@@ -855,6 +868,56 @@ aside button:hover {
   grid-column: 1 / -1;
 }
 
+.assayResourcePlan {
+  margin-bottom: 16px;
+}
+
+.requirementList {
+  display: grid;
+  gap: 8px;
+}
+
+.requirementList > button {
+  justify-self: start;
+}
+
+.resourceRequirementRow {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.6fr) 120px 100px minmax(180px, 1fr) minmax(160px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.compactRequirementList .resourceRequirementRow {
+  grid-template-columns: minmax(220px, 1.4fr) 110px 90px minmax(160px, 1fr) minmax(150px, 1fr) auto;
+}
+
+.miniResourceList {
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
+}
+
+.miniResourceList span,
+.tableWrap small {
+  display: block;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.assignmentResourcePlan {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
 progress {
   width: 96px;
   accent-color: var(--brand-red);
@@ -885,11 +948,13 @@ progress {
   .inlineEdit,
   .subPanel .inlineEdit,
   .detailsGrid,
-  .stabilityAssignment,
-  .stabilityTimePointRow,
-  .stabilityTestRow,
-  .resourceFilters,
-  .resourceUsageForm {
+    .stabilityAssignment,
+    .stabilityTimePointRow,
+    .stabilityTestRow,
+    .resourceFilters,
+    .assayResourceFilters,
+    .resourceRequirementRow,
+    .resourceUsageForm {
     grid-template-columns: 1fr;
   }
 

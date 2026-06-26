@@ -18,6 +18,8 @@ Theme: clean quality operations dashboard
 - Stability time points with custom target windows and per-time-point QC tests
 - Laboratory materials and reagent lot inventory with expiration and minimum-stock monitoring
 - Equipment inventory with calibration due-date monitoring
+- Protocol test resource plans for required materials, reagents, and equipment
+- Scheduled Assay Resources tab for recording execution usage from generated schedules
 - Assay-level material, reagent, and equipment usage with GMP audit entries
 - EM Protocol test delta days from Day 0 Harvest
 - Dynamic assay workflow steps per protocol
@@ -114,6 +116,10 @@ QC Planner supports two safe email paths:
 The mail queue can be processed by the Google Apps Script worker from the previous project, Firebase Cloud Functions if you upgrade to Blaze, or another secure server-side worker. Browser code does not store SMTP passwords.
 
 The same Google Apps Script worker can also run `sendWeeklyStabilityReminder` every Monday at 8 AM. Create an active Personnel record named `Stability Admin` with the email address that should receive the weekly stability digest. The digest includes incomplete QC Stability schedule tests within the next 30 days as high priority and within the next 90 days as upcoming low priority.
+
+## Assay Resource Planning
+
+Supervisors can attach required materials, reagent lots, and equipment to protocol tests. New schedules inherit that resource plan immediately, including schedules generated from QC Stability programs. Analysts record actual usage from the `Assay Resources` tab or any assay `Resources` action; active usage records subtract from available material/reagent inventory and equipment entries show calibration due-date readiness before use.
 
 ## Local Development
 

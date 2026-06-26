@@ -11,6 +11,7 @@ import {
   ClipboardList,
   FlaskConical,
   LayoutDashboard,
+  ListChecks,
   LogOut,
   Mail,
   KeyRound,
@@ -22,11 +23,12 @@ import {
 } from 'lucide-react';
 import { auth, hasFirebaseConfig } from './firebase';
 import { addAuditEntry, addDays, displayTimestamp, formatDate, getOne, listDocs, loadAuditTrail, removeDoc, saveDoc } from './data';
-import LabResources, { AssayResourcesModal } from './LabResources';
+import AssayExecution from './AssayExecution';
+import LabResources, { AssayResourcesModal, normalizeRequirements, ResourceRequirementEditor } from './LabResources';
 import Stability from './Stability';
-import type { AccessLevel, AccessProfile, AdminSetting, AssayResourceUsage, AuditEntry, EmTest, Filters, LabResource, Personnel, Product, Protocol, ProtocolType, Role, Schedule, StabilityProgram, StabilityProtocol, Status, WorkflowStep } from './types';
+import type { AccessLevel, AccessProfile, AdminSetting, AssayResourceRequirement, AssayResourceUsage, AuditEntry, EmTest, Filters, LabResource, Personnel, Product, Protocol, ProtocolType, Role, Schedule, StabilityProgram, StabilityProtocol, Status, WorkflowStep } from './types';
 
-type Tab = 'Dashboard' | 'Create Schedule' | 'Schedules' | 'Calendar' | 'QC Stability' | 'Lab Inventory' | 'Products & Protocols' | 'Personnel' | 'Admin Settings';
+type Tab = 'Dashboard' | 'Create Schedule' | 'Schedules' | 'Calendar' | 'QC Stability' | 'Assay Resources' | 'Lab Inventory' | 'Products & Protocols' | 'Personnel' | 'Admin Settings';
 type Draft<T> = Partial<T> & { id?: string };
 
 const emptyFilters: Filters = { status: 'All', assignee: 'All', protocol: 'All', product: 'All', batch: 'All', test: 'All' };
@@ -89,6 +91,10 @@ const getProtocolSampleId = (protocol: Protocol | undefined, testName: string) =
   if (!protocol || !testName) return '';
   const emTest = protocol.em_tests?.find(test => test.name === testName);
   return emTest?.qc_sample_id || protocol.test_sample_ids?.[testName] || '';
+};
+const getProtocolResourceRequirements = (protocol: Protocol | undefined, testName: string, resources: LabResource[]): AssayResourceRequirement[] => {
+  if (!protocol || !testName) return [];
+  return normalizeRequirements(protocol.resource_requirements?.[testName], resources).map(requirement => ({ ...requirement, id: crypto.randomUUID() }));
 };
 const effectiveProgress = (schedule: Schedule) => {
   if (schedule.status === 'Completed' || schedule.review_status === 'Completed') return 100;
@@ -416,7 +422,7 @@ function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; 
   return <div className="metricCard"><span>{icon}</span><p>{label}</p><strong>{value}</strong></div>;
 }
 
-function CreateSchedule({ products, protocols, personnel, refreshSchedules, user }: { products: Product[]; protocols: Protocol[]; personnel: Personnel[]; refreshSchedules: () => Promise<void>; user: User | null }) {
+function CreateSchedule({ products, protocols, personnel, resources, refreshSchedules, user }: { products: Product[]; protocols: Protocol[]; personnel: Personnel[]; resources: LabResource[]; refreshSchedules: () => Promise<void>; user: User | null }) {
   const [form, setForm] = useState({ product_id: '', product_name: '', batch_number: '', protocol_name: '', harvest_day_zero: '' });
   const [configs, setConfigs] = useState<Record<string, { include: boolean; assignee_id: string; trainee_id: string; reviewer_id: string; is_all_day: boolean; start_time: string; end_time: string; duration_days: number; delta_day: number; workflow_step: string; qc_sample_id: string }>>({});
   const [message, setMessage] = useState('');
@@ -481,6 +487,7 @@ function CreateSchedule({ products, protocols, personnel, refreshSchedules, user
           status: 'Scheduled',
           progress: 0,
           review_status: 'Not Ready',
+          resource_requirements: getProtocolResourceRequirements(selectedProtocol, testName, resources),
           email_status: 'pending',
           created_by: currentUserInfo(user)
         };
@@ -790,7 +797,7 @@ function CalendarView({ schedules, personnel, refreshSchedules, user, canManageS
   return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Calendar control</p><h1>QC Schedule Calendar</h1></div><select value={view} onChange={event => setView(event.target.value)}><option value="dayGridMonth">Month</option><option value="timeGridWeek">Week</option><option value="timeGridDay">Day</option><option value="listWeek">List</option></select></div><FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} /><div className="calendarPanel"><FullCalendar plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]} initialView={view} key={view} events={events} height="auto" headerToolbar={{ left: 'prev,next today', center: 'title', right: '' }} eventClick={info => setSelected(filtered.find(schedule => schedule.id === info.event.id) || null)} /></div>{selected && <Modal title="Scheduled Assay Details" onClose={() => setSelected(null)}><div className="detailsGrid"><div><strong>Test</strong><span>{selected.test_name}</span></div><div><strong>QC Sample ID</strong><span>{selected.qc_sample_id || 'Not set'}</span></div><div><strong>Batch</strong><span>{selected.batch_number}</span></div><div><strong>Product</strong><span>{selected.product_name || selected.product_id}</span></div><div><strong>Protocol</strong><span>{selected.protocol_name}</span></div><div><strong>Main Analyst</strong><span>{personnel.find(person => person.id === selected.assignee_id)?.name || 'Unassigned'}</span></div><div><strong>Trainee Analyst</strong><span>{selected.trainee_id ? personnel.find(person => person.id === selected.trainee_id)?.name || 'Unassigned' : 'None'}</span></div><div><strong>QC Reviewer</strong><span>{personnel.find(person => person.id === selected.reviewer_id)?.name || 'Unassigned'}</span></div><div><strong>Date</strong><span>{formatDate(selected.start_time)}</span></div><div><strong>Status</strong><StatusBadge status={selected.status} /></div>{canManageSchedules ? <label>Duration Days<input type="number" min={1} step={1} value={selected.duration_days || 1} onChange={event => setSelected({ ...selected, duration_days: Math.max(1, Number(event.target.value || 1)) })} /></label> : <div><strong>Duration Days</strong><span>{selected.duration_days || 1}</span></div>}<div className="wide"><strong>Progress</strong><ProgressBar schedule={selected} /></div>{canManageSchedules && <label className="wide">Execution Progress: {Math.min(selected.progress || 0, 80)}%<input type="range" min={0} max={80} step={5} value={Math.min(selected.progress || 0, 80)} onChange={event => setSelected({ ...selected, progress: Number(event.target.value) })} /></label>}<div className="wide modalActions"><button className="primaryButton" onClick={() => { setSelected(null); onOpenResources(selected); }}>Resources</button>{canManageSchedules && <button className="primaryButton" onClick={() => setEdit(selected)}>Edit Entry</button>}{canManageSchedules && <button className="primaryButton" onClick={saveDuration}>Save Duration</button>}{canSendInvites && <button className="primaryButton" onClick={resendInvite}>Send Updated Invite</button>}{canManageSchedules && <button className="primaryButton" onClick={saveProgress}>Save Progress</button>}{canExecuteWorkflow && selected.status !== 'Completed' && selected.status !== 'Pending Review' && <button className="primaryButton" onClick={markComplete}>Test Complete</button>}{canExecuteWorkflow && selected.status === 'Pending Review' && <button className="primaryButton" onClick={markReviewComplete}>Review Complete</button>}</div></div></Modal>}{canManageSchedules && edit && <Modal title="Edit Calendar Entry" onClose={() => setEdit(null)}><ScheduleEditor schedule={edit} personnel={personnel} setSchedule={setEdit} onSave={saveCalendarEdit} /></Modal>}</section>;
 }
 
-function ProductsProtocols({ products, protocols, refreshProducts, refreshProtocols, canManage }: { products: Product[]; protocols: Protocol[]; refreshProducts: () => Promise<void>; refreshProtocols: () => Promise<void>; canManage: boolean }) {
+function ProductsProtocols({ products, protocols, resources, refreshProducts, refreshProtocols, canManage }: { products: Product[]; protocols: Protocol[]; resources: LabResource[]; refreshProducts: () => Promise<void>; refreshProtocols: () => Promise<void>; canManage: boolean }) {
   const [productEdit, setProductEdit] = useState<Draft<Product> | null>(null);
   const [protocolEdit, setProtocolEdit] = useState<Draft<Protocol> | null>(null);
   const saveProduct = async () => { if (!canManage || !productEdit?.name) return; await saveDoc('products', productEdit, productEdit.id); await refreshProducts(); setProductEdit(null); };
@@ -806,36 +813,59 @@ function ProductsProtocols({ products, protocols, refreshProducts, refreshProtoc
       payload.tests = (payload.tests || []).map(test => test.trim()).filter(Boolean);
       payload.test_sample_ids = Object.fromEntries(payload.tests.map(test => [test, payload.test_sample_ids?.[test]?.trim() || '']));
     }
+    payload.resource_requirements = Object.fromEntries((payload.tests || []).map(test => [test, normalizeRequirements(payload.resource_requirements?.[test], resources)]).filter(([, requirements]) => requirements.length));
     await saveDoc('protocols', payload, payload.id);
     await refreshProtocols();
     setProtocolEdit(null);
   };
-  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Master data</p><h1>Products & Protocols</h1></div></div><div className="twoColumn"><div className="panel"><div className="panelHeader"><h2>Products</h2>{canManage && <button onClick={() => setProductEdit({ name: '', product_type: '', description: '', test_frequency: '' })}>Add Product</button>}</div>{products.map(product => <div className="recordRow" key={product.id}><div><strong>{product.name}</strong><span>{product.product_type}</span></div>{canManage && <div><button onClick={() => setProductEdit(product)}>Edit</button><button onClick={() => removeDoc('products', product.id).then(refreshProducts)}>Delete</button></div>}</div>)}</div><div className="panel"><div className="panelHeader"><h2>Protocols</h2>{canManage && <button onClick={() => setProtocolEdit({ name: '', product_id: '', product_name: '', protocol_type: 'QC Sample Plan', tests: [], test_sample_ids: {}, em_tests: [], workflow_steps: [] })}>Add Protocol</button>}</div>{protocols.map(protocol => <div className="recordRow" key={protocol.id}><div><strong>{protocol.name}</strong><span>{protocol.protocol_type} / {protocol.product_name}</span><small>{(protocol.em_tests?.length ? protocol.em_tests.map(test => `${test.name} Day ${test.delta_day}${test.qc_sample_id ? ` / ${test.qc_sample_id}` : ''}`) : (protocol.tests || []).map(test => `${test}${protocol.test_sample_ids?.[test] ? ` / ${protocol.test_sample_ids[test]}` : ''}`)).join(', ')}</small></div>{canManage && <div><button onClick={() => setProtocolEdit({ ...protocol, test_sample_ids: protocol.test_sample_ids || {}, em_tests: protocol.em_tests || [], workflow_steps: protocol.workflow_steps || [] })}>Edit</button><button onClick={() => removeDoc('protocols', protocol.id).then(refreshProtocols)}>Delete</button></div>}</div>)}</div></div>{canManage && productEdit && <Modal title="Product" onClose={() => setProductEdit(null)}><div className="formGrid"><label>Name<input value={productEdit.name || ''} onChange={event => setProductEdit({ ...productEdit, name: event.target.value })} /></label><label>Type<input value={productEdit.product_type || ''} onChange={event => setProductEdit({ ...productEdit, product_type: event.target.value })} /></label><label className="wide">Description<input value={productEdit.description || ''} onChange={event => setProductEdit({ ...productEdit, description: event.target.value })} /></label><button className="primaryButton wide" onClick={saveProduct}>Save Product</button></div></Modal>}{canManage && protocolEdit && <ProtocolModal protocol={protocolEdit} products={products} setProtocol={setProtocolEdit} onSave={saveProtocol} onClose={() => setProtocolEdit(null)} />}</section>;
+  return <section className="screen"><div className="screenHeader"><div><p className="eyebrow">Master data</p><h1>Products & Protocols</h1></div></div><div className="twoColumn"><div className="panel"><div className="panelHeader"><h2>Products</h2>{canManage && <button onClick={() => setProductEdit({ name: '', product_type: '', description: '', test_frequency: '' })}>Add Product</button>}</div>{products.map(product => <div className="recordRow" key={product.id}><div><strong>{product.name}</strong><span>{product.product_type}</span></div>{canManage && <div><button onClick={() => setProductEdit(product)}>Edit</button><button onClick={() => removeDoc('products', product.id).then(refreshProducts)}>Delete</button></div>}</div>)}</div><div className="panel"><div className="panelHeader"><h2>Protocols</h2>{canManage && <button onClick={() => setProtocolEdit({ name: '', product_id: '', product_name: '', protocol_type: 'QC Sample Plan', tests: [], test_sample_ids: {}, em_tests: [], workflow_steps: [], resource_requirements: {} })}>Add Protocol</button>}</div>{protocols.map(protocol => <div className="recordRow" key={protocol.id}><div><strong>{protocol.name}</strong><span>{protocol.protocol_type} / {protocol.product_name}</span><small>{(protocol.em_tests?.length ? protocol.em_tests.map(test => `${test.name} Day ${test.delta_day}${test.qc_sample_id ? ` / ${test.qc_sample_id}` : ''}`) : (protocol.tests || []).map(test => `${test}${protocol.test_sample_ids?.[test] ? ` / ${protocol.test_sample_ids[test]}` : ''}`)).join(', ')}</small></div>{canManage && <div><button onClick={() => setProtocolEdit({ ...protocol, test_sample_ids: protocol.test_sample_ids || {}, em_tests: protocol.em_tests || [], workflow_steps: protocol.workflow_steps || [], resource_requirements: protocol.resource_requirements || {} })}>Edit</button><button onClick={() => removeDoc('protocols', protocol.id).then(refreshProtocols)}>Delete</button></div>}</div>)}</div></div>{canManage && productEdit && <Modal title="Product" onClose={() => setProductEdit(null)}><div className="formGrid"><label>Name<input value={productEdit.name || ''} onChange={event => setProductEdit({ ...productEdit, name: event.target.value })} /></label><label>Type<input value={productEdit.product_type || ''} onChange={event => setProductEdit({ ...productEdit, product_type: event.target.value })} /></label><label className="wide">Description<input value={productEdit.description || ''} onChange={event => setProductEdit({ ...productEdit, description: event.target.value })} /></label><button className="primaryButton wide" onClick={saveProduct}>Save Product</button></div></Modal>}{canManage && protocolEdit && <ProtocolModal protocol={protocolEdit} products={products} resources={resources} setProtocol={setProtocolEdit} onSave={saveProtocol} onClose={() => setProtocolEdit(null)} />}</section>;
 }
 
-function ProtocolModal({ protocol, products, setProtocol, onSave, onClose }: { protocol: Draft<Protocol>; products: Product[]; setProtocol: (protocol: Draft<Protocol>) => void; onSave: () => void; onClose: () => void }) {
+function ProtocolModal({ protocol, products, resources, setProtocol, onSave, onClose }: { protocol: Draft<Protocol>; products: Product[]; resources: LabResource[]; setProtocol: (protocol: Draft<Protocol>) => void; onSave: () => void; onClose: () => void }) {
   const tests = protocol.tests || [];
   const testSampleIds = protocol.test_sample_ids || {};
   const emTests = protocol.em_tests || [];
   const steps = protocol.workflow_steps || [];
+  const resourceRequirements = protocol.resource_requirements || {};
   const setTestName = (index: number, name: string) => {
     const previous = tests[index];
     const nextTests = tests.map((item, i) => i === index ? name : item);
     const nextSampleIds = { ...testSampleIds };
+    const nextRequirements = { ...resourceRequirements };
     if (previous !== name) {
       nextSampleIds[name] = nextSampleIds[previous] || '';
       delete nextSampleIds[previous];
+      nextRequirements[name] = nextRequirements[previous] || [];
+      delete nextRequirements[previous];
     }
-    setProtocol({ ...protocol, tests: nextTests, test_sample_ids: nextSampleIds });
+    setProtocol({ ...protocol, tests: nextTests, test_sample_ids: nextSampleIds, resource_requirements: nextRequirements });
   };
   const setTestSampleId = (testName: string, qcSampleId: string) => setProtocol({ ...protocol, test_sample_ids: { ...testSampleIds, [testName]: qcSampleId } });
   const removeTest = (index: number) => {
     const removed = tests[index];
     const nextSampleIds = { ...testSampleIds };
+    const nextRequirements = { ...resourceRequirements };
     delete nextSampleIds[removed];
-    setProtocol({ ...protocol, tests: tests.filter((_, i) => i !== index), test_sample_ids: nextSampleIds });
+    delete nextRequirements[removed];
+    setProtocol({ ...protocol, tests: tests.filter((_, i) => i !== index), test_sample_ids: nextSampleIds, resource_requirements: nextRequirements });
   };
-  const setEmTest = (index: number, patch: Partial<EmTest>) => setProtocol({ ...protocol, em_tests: emTests.map((item, i) => i === index ? { ...item, ...patch } : item) });
+  const setEmTest = (index: number, patch: Partial<EmTest>) => {
+    const previous = emTests[index]?.name || '';
+    const nextTests = emTests.map((item, i) => i === index ? { ...item, ...patch } : item);
+    const nextRequirements = { ...resourceRequirements };
+    if (patch.name !== undefined && previous !== patch.name) {
+      nextRequirements[patch.name] = nextRequirements[previous] || [];
+      delete nextRequirements[previous];
+    }
+    setProtocol({ ...protocol, em_tests: nextTests, resource_requirements: nextRequirements });
+  };
+  const removeEmTest = (index: number) => {
+    const removed = emTests[index]?.name || '';
+    const nextRequirements = { ...resourceRequirements };
+    delete nextRequirements[removed];
+    setProtocol({ ...protocol, em_tests: emTests.filter((_, i) => i !== index), resource_requirements: nextRequirements });
+  };
+  const setRequirements = (testName: string, requirements: AssayResourceRequirement[]) => setProtocol({ ...protocol, resource_requirements: { ...resourceRequirements, [testName]: requirements } });
   const setStep = (index: number, patch: Partial<WorkflowStep>) => setProtocol({ ...protocol, workflow_steps: steps.map((item, i) => i === index ? { ...item, ...patch } : item) });
   return (
     <Modal title="Protocol" onClose={onClose}>
@@ -846,12 +876,12 @@ function ProtocolModal({ protocol, products, setProtocol, onSave, onClose }: { p
         {protocol.protocol_type === 'EM Protocol' ? (
           <div className="wide subPanel">
             <div className="panelHeader"><h3>EM Tests, Delta Days, and QC Sample IDs</h3><button onClick={() => setProtocol({ ...protocol, em_tests: [...emTests, { name: '', delta_day: 0, qc_sample_id: '' }] })}>Add Test</button></div>
-            {emTests.map((test, index) => <div className="inlineEdit sampleIdEdit emSampleIdEdit" key={index}><input placeholder="Test name" value={test.name} onChange={event => setEmTest(index, { name: event.target.value })} /><input type="number" placeholder="Delta day" value={test.delta_day} onChange={event => setEmTest(index, { delta_day: Number(event.target.value || 0) })} /><input placeholder="QC Sample ID" value={test.qc_sample_id || ''} onChange={event => setEmTest(index, { qc_sample_id: event.target.value })} /><button onClick={() => setProtocol({ ...protocol, em_tests: emTests.filter((_, i) => i !== index) })}>Remove</button></div>)}
+            {emTests.map((test, index) => <div className="testRequirementBlock" key={index}><div className="inlineEdit sampleIdEdit emSampleIdEdit"><input placeholder="Test name" value={test.name} onChange={event => setEmTest(index, { name: event.target.value })} /><input type="number" placeholder="Delta day" value={test.delta_day} onChange={event => setEmTest(index, { delta_day: Number(event.target.value || 0) })} /><input placeholder="QC Sample ID" value={test.qc_sample_id || ''} onChange={event => setEmTest(index, { qc_sample_id: event.target.value })} /><button onClick={() => removeEmTest(index)}>Remove</button></div>{test.name && <ResourceRequirementEditor requirements={resourceRequirements[test.name] || []} resources={resources} onChange={requirements => setRequirements(test.name, requirements)} compact />}</div>)}
           </div>
         ) : (
           <div className="wide subPanel">
             <div className="panelHeader"><h3>Tests and QC Sample IDs</h3><button onClick={() => setProtocol({ ...protocol, tests: [...tests, ''], test_sample_ids: testSampleIds })}>Add Test</button></div>
-            {tests.map((test, index) => <div className="inlineEdit sampleIdEdit" key={index}><input placeholder="Test name" value={test} onChange={event => setTestName(index, event.target.value)} /><input placeholder="QC Sample ID" value={testSampleIds[test] || ''} onChange={event => setTestSampleId(test, event.target.value)} /><button onClick={() => removeTest(index)}>Remove</button></div>)}
+            {tests.map((test, index) => <div className="testRequirementBlock" key={index}><div className="inlineEdit sampleIdEdit"><input placeholder="Test name" value={test} onChange={event => setTestName(index, event.target.value)} /><input placeholder="QC Sample ID" value={testSampleIds[test] || ''} onChange={event => setTestSampleId(test, event.target.value)} /><button onClick={() => removeTest(index)}>Remove</button></div>{test && <ResourceRequirementEditor requirements={resourceRequirements[test] || []} resources={resources} onChange={requirements => setRequirements(test, requirements)} compact />}</div>)}
           </div>
         )}
         <div className="wide subPanel"><div className="panelHeader"><h3>Dynamic assay workflow steps</h3><button onClick={() => setProtocol({ ...protocol, workflow_steps: [...steps, { id: crypto.randomUUID(), name: '', expected_days: 1, required: true }] })}>Add Step</button></div>{steps.map((step, index) => <div className="inlineEdit" key={step.id}><input placeholder="Step name" value={step.name} onChange={event => setStep(index, { name: event.target.value })} /><input type="number" min={0} value={step.expected_days || 0} onChange={event => setStep(index, { expected_days: Number(event.target.value) })} /><button onClick={() => setProtocol({ ...protocol, workflow_steps: steps.filter((_, i) => i !== index) })}>Remove</button></div>)}</div>
@@ -1003,6 +1033,7 @@ export default function App() {
       ['Schedules', ClipboardList],
       ['Calendar', CalendarDays],
       ['QC Stability', Timer],
+      ['Assay Resources', ListChecks],
       ['Lab Inventory', Package],
       ['Products & Protocols', Activity]
     ];
@@ -1035,17 +1066,18 @@ export default function App() {
       </aside>
       <main>
         {tab === 'Dashboard' && <Dashboard schedules={schedules.items} personnel={personnel.items} settings={settings} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} canExecuteWorkflow={canExecuteWorkflow} onOpenResources={setResourceSchedule} />}
-        {canManageSchedules && tab === 'Create Schedule' && <CreateSchedule products={products.items} protocols={protocols.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} />}
+        {canManageSchedules && tab === 'Create Schedule' && <CreateSchedule products={products.items} protocols={protocols.items} personnel={personnel.items} resources={labResources.items} refreshSchedules={schedules.refresh} user={user} />}
         {tab === 'Schedules' && <Schedules schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} canExecuteWorkflow={canExecuteWorkflow} canSendInvites={canSendInvites} onOpenResources={setResourceSchedule} />}
         {tab === 'Calendar' && <CalendarView schedules={schedules.items} personnel={personnel.items} refreshSchedules={schedules.refresh} user={user} canManageSchedules={canManageSchedules} canExecuteWorkflow={canExecuteWorkflow} canSendInvites={canSendInvites} onOpenResources={setResourceSchedule} />}
-        {tab === 'QC Stability' && <Stability products={products.items} personnel={personnel.items} schedules={schedules.items} protocols={stabilityProtocols.items} programs={stabilityPrograms.items} refreshProtocols={stabilityProtocols.refresh} refreshPrograms={stabilityPrograms.refresh} refreshSchedules={schedules.refresh} user={user} canManage={canManageSchedules} />}
+        {tab === 'QC Stability' && <Stability products={products.items} personnel={personnel.items} resources={labResources.items} schedules={schedules.items} protocols={stabilityProtocols.items} programs={stabilityPrograms.items} refreshProtocols={stabilityProtocols.refresh} refreshPrograms={stabilityPrograms.refresh} refreshSchedules={schedules.refresh} user={user} canManage={canManageSchedules} />}
+        {tab === 'Assay Resources' && <AssayExecution schedules={schedules.items} resources={labResources.items} usages={resourceUsages.items} personnel={personnel.items} refreshSchedules={schedules.refresh} refreshUsages={resourceUsages.refresh} user={user} canLog={canExecuteWorkflow} canManage={canManageSchedules} />}
         {tab === 'Lab Inventory' && <LabResources resources={labResources.items} usages={resourceUsages.items} schedules={schedules.items} personnel={personnel.items} refreshResources={labResources.refresh} refreshUsages={resourceUsages.refresh} user={user} canManage={canManageSchedules} />}
-        {tab === 'Products & Protocols' && <ProductsProtocols products={products.items} protocols={protocols.items} refreshProducts={products.refresh} refreshProtocols={protocols.refresh} canManage={canManageSchedules} />}
+        {tab === 'Products & Protocols' && <ProductsProtocols products={products.items} protocols={protocols.items} resources={labResources.items} refreshProducts={products.refresh} refreshProtocols={protocols.refresh} canManage={canManageSchedules} />}
         {isAdmin && tab === 'Personnel' && <PersonnelPage personnel={personnel.items} refreshPersonnel={personnel.refresh} />}
         {isAdmin && tab === 'Admin Settings' && <AdminSettingsPage settings={settings} onSaved={setSettings} />}
       </main>
       {showPasswordModal && <ChangePasswordModal user={user} onClose={() => setShowPasswordModal(false)} />}
-      {resourceSchedule && <AssayResourcesModal schedule={resourceSchedule} resources={labResources.items} usages={resourceUsages.items} refreshUsages={resourceUsages.refresh} user={user} canLog={canExecuteWorkflow} canManage={canManageSchedules} onClose={() => setResourceSchedule(null)} />}
+      {resourceSchedule && <AssayResourcesModal schedule={resourceSchedule} resources={labResources.items} usages={resourceUsages.items} refreshUsages={resourceUsages.refresh} refreshSchedules={schedules.refresh} user={user} canLog={canExecuteWorkflow} canManage={canManageSchedules} onClose={() => setResourceSchedule(null)} />}
     </div>
   );
 }

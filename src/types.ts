@@ -30,6 +30,18 @@ export interface WorkflowStep {
   required?: boolean;
 }
 
+export type LabResourceType = 'Material' | 'Reagent' | 'Equipment';
+
+export interface AssayResourceRequirement {
+  id: string;
+  resource_id: string;
+  resource_name: string;
+  resource_type: LabResourceType;
+  quantity: number;
+  unit?: string;
+  notes?: string;
+}
+
 export interface Protocol extends BaseDoc {
   name: string;
   protocol_id?: string;
@@ -41,6 +53,7 @@ export interface Protocol extends BaseDoc {
   test_sample_ids?: Record<string, string>;
   em_tests?: EmTest[];
   workflow_steps?: WorkflowStep[];
+  resource_requirements?: Record<string, AssayResourceRequirement[]>;
 }
 
 export interface Personnel extends BaseDoc {
@@ -88,6 +101,7 @@ export interface Schedule extends BaseDoc {
   status: Status;
   progress?: number;
   review_status?: 'Not Ready' | 'Pending Review' | 'Completed';
+  resource_requirements?: AssayResourceRequirement[];
   test_completed_at?: unknown;
   review_completed_at?: unknown;
   email_status?: 'pending' | 'processing' | 'sent' | 'failed' | 'drafted';
@@ -97,8 +111,6 @@ export interface Schedule extends BaseDoc {
   completed_by?: string;
   deleted_by?: string;
 }
-
-export type LabResourceType = 'Material' | 'Reagent' | 'Equipment';
 
 export interface LabResource extends BaseDoc {
   type: LabResourceType;
@@ -121,6 +133,7 @@ export interface LabResource extends BaseDoc {
 
 export interface AssayResourceUsage extends BaseDoc {
   schedule_id: string;
+  requirement_id?: string;
   resource_id: string;
   resource_name: string;
   resource_type: LabResourceType;
@@ -170,6 +183,7 @@ export interface StabilityTestTemplate {
   id: string;
   name: string;
   qc_sample_id?: string;
+  resource_requirements?: AssayResourceRequirement[];
 }
 
 export interface StabilityTimePointTemplate {
@@ -199,6 +213,7 @@ export interface StabilityAssignment {
   window_end_offset_days: number;
   test_name: string;
   qc_sample_id?: string;
+  resource_requirements?: AssayResourceRequirement[];
   include: boolean;
   assignee_id: string;
   trainee_id?: string;

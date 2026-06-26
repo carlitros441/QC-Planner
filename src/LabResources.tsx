@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { User } from 'firebase/auth';
-import { addAuditEntry, formatDate, saveDoc } from './data';
-import type { AssayResourceUsage, LabResource, LabResourceType, Personnel, Schedule } from './types';
+import { addAuditEntry, formatDate, getOne, saveDoc } from './data';
+import type { AssayResourceRequirement, AssayResourceUsage, LabResource, LabResourceType, Personnel, Schedule } from './types';
 
 type Draft<T> = Partial<T> & { id?: string };
 
@@ -13,18 +13,40 @@ const localDate = (value = new Date()) => {
   const day = String(value.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
-const daysUntil = (value?: string) => {
+export const daysUntil = (value?: string) => {
   if (!value) return Number.POSITIVE_INFINITY;
   const target = new Date(`${formatDate(value)}T00:00:00`);
   const today = new Date(`${localDate()}T00:00:00`);
   return Math.ceil((target.getTime() - today.getTime()) / 86400000);
 };
-const isConsumable = (resource: LabResource) => resource.type !== 'Equipment';
-const activeUsage = (usages: AssayResourceUsage[]) => usages.filter(usage => usage.status !== 'Voided');
-const quantityUsed = (resourceId: string, usages: AssayResourceUsage[]) => activeUsage(usages)
+export const isConsumable = (resource: LabResource) => resource.type !== 'Equipment';
+export const activeUsage = (usages: AssayResourceUsage[]) => usages.filter(usage => usage.status !== 'Voided');
+export const quantityUsed = (resourceId: string, usages: AssayResourceUsage[]) => activeUsage(usages)
   .filter(usage => usage.resource_id === resourceId)
   .reduce((sum, usage) => sum + Number(usage.quantity || 0), 0);
-const quantityRemaining = (resource: LabResource, usages: AssayResourceUsage[]) => Math.max(0, Number(resource.quantity_received || 0) - quantityUsed(resource.id, usages));
+export const quantityRemaining = (resource: LabResource, usages: AssayResourceUsage[]) => Math.max(0, Number(resource.quantity_received || 0) - quantityUsed(resource.id, usages));
+
+const resourceLabel = (resource: LabResource) => `${resource.type} / ${resource.name}${resource.lot_number ? ` / Lot ${resource.lot_number}` : ''}${resource.equipment_id ? ` / ${resource.equipment_id}` : ''}`;
+
+export function normalizeRequirement(requirement: Partial<AssayResourceRequirement>, resources: LabResource[]): AssayResourceRequirement | null {
+  const resource = resources.find(item => item.id === requirement.resource_id);
+  if (!resource) return null;
+  return {
+    id: requirement.id || crypto.randomUUID(),
+    resource_id: resource.id,
+    resource_name: resource.name,
+    resource_type: resource.type,
+    quantity: resource.type === 'Equipment' ? 1 : Math.max(0.0001, Number(requirement.quantity || 1)),
+    unit: resource.type === 'Equipment' ? 'use' : resource.unit || requirement.unit || '',
+    notes: requirement.notes?.trim() || ''
+  };
+}
+
+export function normalizeRequirements(requirements: AssayResourceRequirement[] | undefined, resources: LabResource[]) {
+  return (requirements || [])
+    .map(requirement => normalizeRequirement(requirement, resources))
+    .filter((requirement): requirement is AssayResourceRequirement => Boolean(requirement));
+}
 
 function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   return (
@@ -37,7 +59,7 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
   );
 }
 
-function ResourceStatus({ resource, usages }: { resource: LabResource; usages: AssayResourceUsage[] }) {
+export function ResourceStatus({ resource, usages }: { resource: LabResource; usages: AssayResourceUsage[] }) {
   let label = 'Available';
   let className = 'resource-ok';
   const dueDate = resource.type === 'Equipment' ? resource.calibration_due_date : resource.expiration_date;
@@ -103,11 +125,91 @@ function ResourceEditor({ resource, setResource, onSave }: { resource: Draft<Lab
   );
 }
 
+export function ResourceRequirementEditor({
+  requirements,
+  resources,
+  usages,
+  onChange,
+  disabled = false,
+  compact = false
+}: {
+  requirements: AssayResourceRequirement[];
+  resources: LabResource[];
+  usages?: AssayResourceUsage[];
+  onChange: (requirements: AssayResourceRequirement[]) => void;
+  disabled?: boolean;
+  compact?: boolean;
+}) {
+  const availableResources = resources.filter(resource => resource.active !== false);
+  const setRequirement = (id: string, patch: Partial<AssayResourceRequirement>) => {
+    onChange(requirements.map(requirement => {
+      if (requirement.id !== id) return requirement;
+      const resource = patch.resource_id ? resources.find(item => item.id === patch.resource_id) : undefined;
+      return {
+        ...requirement,
+        ...patch,
+        ...(resource ? {
+          resource_id: resource.id,
+          resource_name: resource.name,
+          resource_type: resource.type,
+          unit: resource.type === 'Equipment' ? 'use' : resource.unit || '',
+          quantity: resource.type === 'Equipment' ? 1 : Math.max(0.0001, Number(requirement.quantity || 1))
+        } : {})
+      };
+    }));
+  };
+  const addRequirement = () => {
+    const resource = availableResources[0];
+    if (!resource) {
+      onChange([...requirements, {
+        id: crypto.randomUUID(),
+        resource_id: '',
+        resource_name: '',
+        resource_type: 'Material',
+        quantity: 1,
+        unit: '',
+        notes: ''
+      }]);
+      return;
+    }
+    onChange([...requirements, {
+      id: crypto.randomUUID(),
+      resource_id: resource.id,
+      resource_name: resource.name,
+      resource_type: resource.type,
+      quantity: resource.type === 'Equipment' ? 1 : 1,
+      unit: resource.type === 'Equipment' ? 'use' : resource.unit || '',
+      notes: ''
+    }]);
+  };
+
+  return (
+    <div className={`requirementList ${compact ? 'compactRequirementList' : ''}`}>
+      {requirements.map(requirement => {
+        const selected = resources.find(resource => resource.id === requirement.resource_id);
+        return (
+          <div className="resourceRequirementRow" key={requirement.id}>
+            <label>Needed Resource<select disabled={disabled} value={requirement.resource_id || ''} onChange={event => setRequirement(requirement.id, { resource_id: event.target.value })}><option value="">Select material, reagent, or equipment</option>{availableResources.map(resource => <option key={resource.id} value={resource.id}>{resourceLabel(resource)}</option>)}</select></label>
+            <label>Quantity<input disabled={disabled || selected?.type === 'Equipment'} type="number" min={0.0001} step="any" value={requirement.quantity || 1} onChange={event => setRequirement(requirement.id, { quantity: Number(event.target.value || 1) })} /></label>
+            <label>Unit<input disabled value={selected?.type === 'Equipment' ? 'use' : selected?.unit || requirement.unit || ''} /></label>
+            {usages && selected && <div className="resourceSelectionSummary"><ResourceStatus resource={selected} usages={usages} /><span>{isConsumable(selected) ? `${quantityRemaining(selected, usages)} ${selected.unit || ''} available` : `Calibration due ${formatDate(selected.calibration_due_date) || 'not set'}`}</span></div>}
+            <label>Notes<input disabled={disabled} value={requirement.notes || ''} onChange={event => setRequirement(requirement.id, { notes: event.target.value })} /></label>
+            {!disabled && <button type="button" onClick={() => onChange(requirements.filter(item => item.id !== requirement.id))}>Remove</button>}
+          </div>
+        );
+      })}
+      {!requirements.length && <div className="emptyState">No material, reagent, or equipment requirements are linked yet.</div>}
+      {!disabled && <button type="button" onClick={addRequirement}>Add Resource Requirement</button>}
+    </div>
+  );
+}
+
 export function AssayResourcesModal({
   schedule,
   resources,
   usages,
   refreshUsages,
+  refreshSchedules,
   user,
   canLog,
   canManage,
@@ -117,6 +219,7 @@ export function AssayResourcesModal({
   resources: LabResource[];
   usages: AssayResourceUsage[];
   refreshUsages: () => Promise<void>;
+  refreshSchedules?: () => Promise<void>;
   user: User | null;
   canLog: boolean;
   canManage: boolean;
@@ -126,38 +229,83 @@ export function AssayResourcesModal({
   const [resourceId, setResourceId] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState('');
+  const [planned, setPlanned] = useState<AssayResourceRequirement[]>(() => normalizeRequirements(schedule.resource_requirements, resources));
+  const [usageDrafts, setUsageDrafts] = useState<Record<string, { resource_id: string; quantity: number; notes: string }>>({});
   const [message, setMessage] = useState('');
   const selected = resources.find(resource => resource.id === resourceId);
   const remaining = selected ? quantityRemaining(selected, usages) : 0;
   const selectedDueDate = selected?.type === 'Equipment' ? selected.calibration_due_date : selected?.expiration_date;
   const selectedBlocked = !selected || selected.active === false || (selected.type === 'Equipment' && !selected.calibration_due_date) || daysUntil(selectedDueDate) < 0 || (isConsumable(selected) && (remaining <= 0 || quantity > remaining));
   const availableResources = resources.filter(resource => resource.active !== false);
+  const canRecord = canLog && schedule.status !== 'Completed' && schedule.status !== 'Deleted';
 
-  const logUsage = async () => {
-    if (!canLog || !selected || selectedBlocked || schedule.status === 'Completed' || schedule.status === 'Deleted') return;
-    const usedQuantity = selected.type === 'Equipment' ? 1 : Number(quantity || 0);
-    if (usedQuantity <= 0) return setMessage('Enter a quantity greater than zero.');
+  useEffect(() => {
+    const normalized = normalizeRequirements(schedule.resource_requirements, resources);
+    setPlanned(normalized);
+    setUsageDrafts(Object.fromEntries(normalized.map(requirement => [requirement.id, { resource_id: requirement.resource_id, quantity: requirement.quantity || 1, notes: '' }])));
+  }, [schedule.id, schedule.resource_requirements, resources]);
+
+  const resourceBlocked = (resource: LabResource | undefined, requestedQuantity: number) => {
+    if (!resource) return true;
+    const dueDate = resource.type === 'Equipment' ? resource.calibration_due_date : resource.expiration_date;
+    return resource.active === false
+      || (resource.type === 'Equipment' && !resource.calibration_due_date)
+      || daysUntil(dueDate) < 0
+      || (isConsumable(resource) && (quantityRemaining(resource, usages) <= 0 || Number(requestedQuantity || 0) > quantityRemaining(resource, usages)));
+  };
+
+  const logUsageForResource = async (resource: LabResource, usedQuantity: number, usageNotes: string, requirementId?: string) => {
+    if (!canRecord || resourceBlocked(resource, usedQuantity)) return;
+    const actualQuantity = resource.type === 'Equipment' ? 1 : Number(usedQuantity || 0);
+    if (actualQuantity <= 0) return setMessage('Enter a quantity greater than zero.');
     const payload: Omit<AssayResourceUsage, 'id'> = {
       schedule_id: schedule.id,
-      resource_id: selected.id,
-      resource_name: selected.name,
-      resource_type: selected.type,
-      quantity: usedQuantity,
-      unit: selected.type === 'Equipment' ? 'use' : selected.unit || '',
-      lot_number: selected.lot_number || '',
-      equipment_id: selected.equipment_id || '',
+      requirement_id: requirementId || '',
+      resource_id: resource.id,
+      resource_name: resource.name,
+      resource_type: resource.type,
+      quantity: actualQuantity,
+      unit: resource.type === 'Equipment' ? 'use' : resource.unit || '',
+      lot_number: resource.lot_number || '',
+      equipment_id: resource.equipment_id || '',
       used_at: new Date().toISOString(),
       used_by: currentUserInfo(user),
-      notes: notes.trim(),
+      notes: usageNotes.trim(),
       status: 'Active'
     };
     const usageId = await saveDoc('assayResourceUsage', payload);
-    await addAuditEntry(schedule.id, 'RESOURCE_USAGE_LOGGED', null, { ...payload, id: usageId }, `Recorded ${selected.type.toLowerCase()} usage: ${selected.name}`, currentUserInfo(user));
+    await addAuditEntry(schedule.id, 'RESOURCE_USAGE_LOGGED', null, { ...payload, id: usageId }, `Recorded ${resource.type.toLowerCase()} usage: ${resource.name}`, currentUserInfo(user));
     await refreshUsages();
+    setMessage(`${resource.name} recorded for this assay.`);
+  };
+
+  const logUsage = async () => {
+    if (!selected || selectedBlocked) return;
+    await logUsageForResource(selected, selected.type === 'Equipment' ? 1 : quantity, notes);
     setResourceId('');
     setQuantity(1);
     setNotes('');
-    setMessage(`${selected.name} recorded for this assay.`);
+  };
+
+  const recordRequirementUsage = async (requirement: AssayResourceRequirement) => {
+    const draft = usageDrafts[requirement.id] || { resource_id: requirement.resource_id, quantity: requirement.quantity || 1, notes: '' };
+    const resource = resources.find(item => item.id === draft.resource_id);
+    if (!resource || resourceBlocked(resource, draft.quantity)) return;
+    await logUsageForResource(resource, resource.type === 'Equipment' ? 1 : draft.quantity, draft.notes || requirement.notes || '', requirement.id);
+    setUsageDrafts(current => ({ ...current, [requirement.id]: { resource_id: requirement.resource_id, quantity: requirement.quantity || 1, notes: '' } }));
+  };
+
+  const savePlan = async () => {
+    if (!canManage) return;
+    const nextPlan = normalizeRequirements(planned, resources);
+    const before = await getOne<Schedule>('schedules', schedule.id) || schedule;
+    const after = { ...before, resource_requirements: nextPlan, updated_by: currentUserInfo(user) };
+    await saveDoc('schedules', after, schedule.id);
+    await addAuditEntry(schedule.id, 'RESOURCE_PLAN_UPDATE', before, after, 'Updated assay resource plan', currentUserInfo(user));
+    await refreshSchedules?.();
+    setPlanned(nextPlan);
+    setUsageDrafts(Object.fromEntries(nextPlan.map(requirement => [requirement.id, { resource_id: requirement.resource_id, quantity: requirement.quantity || 1, notes: '' }])));
+    setMessage('Assay resource plan saved.');
   };
 
   const voidUsage = async (usage: AssayResourceUsage) => {
@@ -177,8 +325,35 @@ export function AssayResourcesModal({
         <span>{schedule.product_name || schedule.product_id}</span>
       </div>
       {message && <div className="infoBox">{message}</div>}
-      {canLog && schedule.status !== 'Completed' && schedule.status !== 'Deleted' && <div className="resourceUsageForm">
-        <label>Resource<select value={resourceId} onChange={event => { setResourceId(event.target.value); setQuantity(1); setMessage(''); }}><option value="">Select material, reagent, or equipment</option>{availableResources.map(resource => <option key={resource.id} value={resource.id}>{resource.type} / {resource.name}{resource.lot_number ? ` / Lot ${resource.lot_number}` : ''}{resource.equipment_id ? ` / ${resource.equipment_id}` : ''}</option>)}</select></label>
+      <div className="panel assayResourcePlan">
+        <div className="panelHeader"><h2>Planned Execution Resources</h2>{canManage && <button onClick={savePlan}>Save Plan</button>}</div>
+        {canManage ? <ResourceRequirementEditor requirements={planned} resources={resources} usages={usages} onChange={setPlanned} compact /> : <ResourceRequirementEditor requirements={planned} resources={resources} usages={usages} onChange={setPlanned} disabled compact />}
+        {canRecord && planned.length > 0 && <div className="tableWrap">
+          <table>
+            <thead><tr><th>Required</th><th>Actual Dropdown</th><th>Quantity</th><th>Readiness</th><th>Notes</th><th>Action</th></tr></thead>
+            <tbody>
+              {planned.map(requirement => {
+                const draft = usageDrafts[requirement.id] || { resource_id: requirement.resource_id, quantity: requirement.quantity || 1, notes: '' };
+                const options = availableResources.filter(resource => resource.type === requirement.resource_type);
+                const resource = resources.find(item => item.id === draft.resource_id);
+                const blocked = resourceBlocked(resource, draft.quantity);
+                return (
+                  <tr key={requirement.id}>
+                    <td><strong>{requirement.resource_name}</strong><small>{requirement.resource_type} / {requirement.quantity} {requirement.unit}</small></td>
+                    <td><select value={draft.resource_id || ''} onChange={event => setUsageDrafts(current => ({ ...current, [requirement.id]: { ...draft, resource_id: event.target.value } }))}><option value="">Select {requirement.resource_type.toLowerCase()}</option>{options.map(option => <option key={option.id} value={option.id}>{resourceLabel(option)}</option>)}</select></td>
+                    <td>{resource?.type === 'Equipment' ? '1 use' : <input type="number" min={0.0001} step="any" value={draft.quantity || 1} onChange={event => setUsageDrafts(current => ({ ...current, [requirement.id]: { ...draft, quantity: Number(event.target.value || 1) } }))} />}</td>
+                    <td>{resource ? <div className="resourceSelectionSummary"><ResourceStatus resource={resource} usages={usages} /><span>{isConsumable(resource) ? `${quantityRemaining(resource, usages)} ${resource.unit || ''} available` : `Calibration due ${formatDate(resource.calibration_due_date) || 'not set'}`}</span></div> : 'Select resource'}</td>
+                    <td><input value={draft.notes || ''} onChange={event => setUsageDrafts(current => ({ ...current, [requirement.id]: { ...draft, notes: event.target.value } }))} /></td>
+                    <td><button className="primaryButton" disabled={blocked} onClick={() => recordRequirementUsage(requirement)}>Record</button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>}
+      </div>
+      {canRecord && <div className="resourceUsageForm">
+        <label>Additional Resource<select value={resourceId} onChange={event => { setResourceId(event.target.value); setQuantity(1); setMessage(''); }}><option value="">Select material, reagent, or equipment</option>{availableResources.map(resource => <option key={resource.id} value={resource.id}>{resourceLabel(resource)}</option>)}</select></label>
         {selected && <div className="resourceSelectionSummary"><ResourceStatus resource={selected} usages={usages} /><span>{isConsumable(selected) ? `${remaining} ${selected.unit || ''} available` : `Calibration due ${formatDate(selected.calibration_due_date) || 'not set'}`}</span></div>}
         {selected?.type !== 'Equipment' && <label>Quantity Used<input type="number" min={0.0001} max={remaining || undefined} step="any" value={quantity} onChange={event => setQuantity(Number(event.target.value || 0))} /></label>}
         <label>Notes<input value={notes} onChange={event => setNotes(event.target.value)} /></label>
