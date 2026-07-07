@@ -43,6 +43,7 @@ const defaultSettings: AdminSetting = {
 };
 
 const currentUserInfo = (user: User | null) => user?.email || user?.uid || 'unknown';
+const workflowErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unable to update this assay. Please try again.';
 const normalizeEmail = (email?: string | null) => String(email || '').split(/[;,]/)[0].trim().toLowerCase();
 const accessLevelForRole = (role?: Role): AccessLevel => {
   if (role === 'Admin') return 'Admin';
@@ -345,15 +346,19 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user, can
       reviewComplete ? 'QC review completed' : 'Testing completed'
     );
     if (reason === null) return;
-    const before = await getOne<Schedule>('schedules', schedule.id);
-    const after = reviewComplete
-      ? { ...schedule, status: 'Completed' as Status, progress: 100, review_status: 'Completed' as const, review_completed_at: new Date().toISOString(), completed_by: currentUserInfo(user), updated_by: currentUserInfo(user) }
-      : { ...schedule, status: 'Pending Review' as Status, progress: 80, review_status: 'Pending Review' as const, test_completed_at: new Date().toISOString(), completed_by: currentUserInfo(user), updated_by: currentUserInfo(user) };
-    await saveDoc('schedules', after, schedule.id);
-    await addAuditEntry(schedule.id, action, before, after, reason, currentUserInfo(user));
-    await refreshSchedules();
-    setDetailSchedule(current => current?.id === schedule.id ? after : current);
-    setLotDetail(current => current ? { ...current, schedules: current.schedules.map(item => item.id === schedule.id ? after : item) } : current);
+    try {
+      const before = await getOne<Schedule>('schedules', schedule.id);
+      const after = reviewComplete
+        ? { ...schedule, status: 'Completed' as Status, progress: 100, review_status: 'Completed' as const, review_completed_at: new Date().toISOString(), completed_by: currentUserInfo(user), updated_by: currentUserInfo(user) }
+        : { ...schedule, status: 'Pending Review' as Status, progress: 80, review_status: 'Pending Review' as const, test_completed_at: new Date().toISOString(), completed_by: currentUserInfo(user), updated_by: currentUserInfo(user) };
+      await saveDoc('schedules', after, schedule.id);
+      await addAuditEntry(schedule.id, action, before, after, reason, currentUserInfo(user));
+      await refreshSchedules();
+      setDetailSchedule(current => current?.id === schedule.id ? after : current);
+      setLotDetail(current => current ? { ...current, schedules: current.schedules.map(item => item.id === schedule.id ? after : item) } : current);
+    } catch (error) {
+      window.alert(workflowErrorMessage(error));
+    }
   };
   const WorkflowButtons = ({ schedule }: { schedule: Schedule }) => (
     <>
@@ -601,11 +606,15 @@ function Schedules({ schedules, personnel, refreshSchedules, user, canManageSche
     if (!canManageSchedules && !['TEST_COMPLETE', 'REVIEW_COMPLETE'].includes(action)) return;
     const reason = window.prompt('Reason for this GMP audit trail entry:', action);
     if (reason === null) return;
-    const before = await getOne<Schedule>('schedules', schedule.id);
-    await saveDoc('schedules', { ...schedule, updated_by: currentUserInfo(user) }, schedule.id);
-    await addAuditEntry(schedule.id, action, before, schedule, reason, currentUserInfo(user));
-    await refreshSchedules();
-    setEdit(null);
+    try {
+      const before = await getOne<Schedule>('schedules', schedule.id);
+      await saveDoc('schedules', { ...schedule, updated_by: currentUserInfo(user) }, schedule.id);
+      await addAuditEntry(schedule.id, action, before, schedule, reason, currentUserInfo(user));
+      await refreshSchedules();
+      setEdit(null);
+    } catch (error) {
+      window.alert(workflowErrorMessage(error));
+    }
   };
 
   const setStatus = async (schedule: Schedule, status: Status) => {
@@ -738,11 +747,15 @@ function CalendarView({ schedules, personnel, refreshSchedules, user, canManageS
     return { id: schedule.id, title: `${initials(person?.initials || person?.name)}_${schedule.batch_number}_${schedule.test_name}`, start, end: endDate, allDay: schedule.is_all_day, backgroundColor: schedule.status === 'Completed' ? '#2d3748' : '#b11226', borderColor: '#841627' };
   });
   const saveCalendarSchedule = async (schedule: Schedule, action: string, reason: string) => {
-    const before = await getOne<Schedule>('schedules', schedule.id);
-    await saveDoc('schedules', { ...schedule, updated_by: currentUserInfo(user) }, schedule.id);
-    await addAuditEntry(schedule.id, action, before, schedule, reason, currentUserInfo(user));
-    await refreshSchedules();
-    setSelected(schedule);
+    try {
+      const before = await getOne<Schedule>('schedules', schedule.id);
+      await saveDoc('schedules', { ...schedule, updated_by: currentUserInfo(user) }, schedule.id);
+      await addAuditEntry(schedule.id, action, before, schedule, reason, currentUserInfo(user));
+      await refreshSchedules();
+      setSelected(schedule);
+    } catch (error) {
+      window.alert(workflowErrorMessage(error));
+    }
   };
   const saveCalendarEdit = async (schedule: Schedule) => {
     if (!canManageSchedules) return;

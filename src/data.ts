@@ -30,6 +30,8 @@ function stripUndefined(value: unknown): unknown {
     return value.map(stripUndefined).filter(item => item !== undefined);
   }
   if (value && typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return value;
     const source = value as Record<string, unknown>;
     return Object.fromEntries(
       Object.entries(source)
