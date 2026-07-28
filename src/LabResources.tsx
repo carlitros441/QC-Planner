@@ -237,7 +237,7 @@ export function AssayResourcesModal({
   const selectedDueDate = selected?.type === 'Equipment' ? selected.calibration_due_date : selected?.expiration_date;
   const selectedBlocked = !selected || selected.active === false || (selected.type === 'Equipment' && !selected.calibration_due_date) || daysUntil(selectedDueDate) < 0 || (isConsumable(selected) && (remaining <= 0 || quantity > remaining));
   const availableResources = resources.filter(resource => resource.active !== false);
-  const canRecord = canLog && schedule.status !== 'Completed' && schedule.status !== 'Deleted';
+  const canRecord = canLog && schedule.status !== 'Deleted';
 
   useEffect(() => {
     const normalized = normalizeRequirements(schedule.resource_requirements, resources);
@@ -324,6 +324,7 @@ export function AssayResourcesModal({
         <div><strong>{schedule.batch_number}</strong><span>{schedule.test_name}</span></div>
         <span>{schedule.product_name || schedule.product_id}</span>
       </div>
+      {canRecord && schedule.status === 'Completed' && <div className="infoBox">This assay is complete. Additional resource usage will be recorded as a post-completion audit entry.</div>}
       {message && <div className="infoBox">{message}</div>}
       <div className="panel assayResourcePlan">
         <div className="panelHeader"><h2>Planned Execution Resources</h2>{canManage && <button onClick={savePlan}>Save Plan</button>}</div>
