@@ -112,6 +112,7 @@ function buildAssignments(protocol: StabilityProtocol, harvestDay: string): Stab
       include: true,
       assignee_id: '',
       trainee_id: '',
+      trainee_2_id: '',
       reviewer_id: '',
       start_time: target,
       duration_days: 1
@@ -238,6 +239,7 @@ function ProgramEditor({
           include: true,
           assignee_id: '',
           trainee_id: '',
+          trainee_2_id: '',
           reviewer_id: '',
           start_time: target,
           duration_days: 1
@@ -274,9 +276,10 @@ function ProgramEditor({
             <label>Window End<input type="date" value={formatDate(assignment.window_end)} onChange={event => setAssignment(assignment.id, { window_end: event.target.value })} /></label>
             <label>Test<input value={assignment.test_name} onChange={event => setAssignment(assignment.id, { test_name: event.target.value })} /></label>
             <label>QC Sample ID<input value={assignment.qc_sample_id || ''} onChange={event => setAssignment(assignment.id, { qc_sample_id: event.target.value })} /></label>
-            <label>Main Analyst<select disabled={!assignment.include} required={assignment.include} value={assignment.assignee_id} onChange={event => setAssignment(assignment.id, { assignee_id: event.target.value, trainee_id: assignment.trainee_id === event.target.value ? '' : assignment.trainee_id, reviewer_id: assignment.reviewer_id === event.target.value ? '' : assignment.reviewer_id })}><option value="">Select analyst</option>{people.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
-            <label>Trainee<select disabled={!assignment.include} value={assignment.trainee_id || ''} onChange={event => setAssignment(assignment.id, { trainee_id: event.target.value, reviewer_id: assignment.reviewer_id === event.target.value ? '' : assignment.reviewer_id })}><option value="">No trainee</option>{people.filter(person => person.id !== assignment.assignee_id && person.id !== assignment.reviewer_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
-            <label>QC Reviewer<select disabled={!assignment.include} required={assignment.include} value={assignment.reviewer_id} onChange={event => setAssignment(assignment.id, { reviewer_id: event.target.value, trainee_id: assignment.trainee_id === event.target.value ? '' : assignment.trainee_id })}><option value="">Select reviewer</option>{people.filter(person => person.id !== assignment.assignee_id && person.id !== assignment.trainee_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+            <label>Main Analyst<select disabled={!assignment.include} required={assignment.include} value={assignment.assignee_id} onChange={event => setAssignment(assignment.id, { assignee_id: event.target.value, trainee_id: assignment.trainee_id === event.target.value ? '' : assignment.trainee_id, trainee_2_id: assignment.trainee_2_id === event.target.value ? '' : assignment.trainee_2_id, reviewer_id: assignment.reviewer_id === event.target.value ? '' : assignment.reviewer_id })}><option value="">Select analyst</option>{people.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+            <label>Trainee 1<select disabled={!assignment.include} value={assignment.trainee_id || ''} onChange={event => setAssignment(assignment.id, { trainee_id: event.target.value, trainee_2_id: assignment.trainee_2_id === event.target.value ? '' : assignment.trainee_2_id, reviewer_id: assignment.reviewer_id === event.target.value ? '' : assignment.reviewer_id })}><option value="">No trainee</option>{people.filter(person => person.id !== assignment.assignee_id && person.id !== assignment.trainee_2_id && person.id !== assignment.reviewer_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+            <label>Trainee 2<select disabled={!assignment.include} value={assignment.trainee_2_id || ''} onChange={event => setAssignment(assignment.id, { trainee_2_id: event.target.value, trainee_id: assignment.trainee_id === event.target.value ? '' : assignment.trainee_id, reviewer_id: assignment.reviewer_id === event.target.value ? '' : assignment.reviewer_id })}><option value="">No second trainee</option>{people.filter(person => person.id !== assignment.assignee_id && person.id !== assignment.trainee_id && person.id !== assignment.reviewer_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+            <label>QC Reviewer<select disabled={!assignment.include} required={assignment.include} value={assignment.reviewer_id} onChange={event => setAssignment(assignment.id, { reviewer_id: event.target.value, trainee_id: assignment.trainee_id === event.target.value ? '' : assignment.trainee_id, trainee_2_id: assignment.trainee_2_id === event.target.value ? '' : assignment.trainee_2_id })}><option value="">Select reviewer</option>{people.filter(person => person.id !== assignment.assignee_id && person.id !== assignment.trainee_id && person.id !== assignment.trainee_2_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
             <label>Scheduled Date<input disabled={!assignment.include} required={assignment.include} min={assignment.window_start} max={assignment.window_end} type="date" value={formatDate(assignment.start_time)} onChange={event => setAssignment(assignment.id, { start_time: event.target.value })} /></label>
             <label>Duration<input type="number" min={1} value={assignment.duration_days || 1} onChange={event => setAssignment(assignment.id, { duration_days: Number(event.target.value || 1) })} /></label>
             <button type="button" onClick={() => removeAssignment(assignment.id)}>Remove</button>
@@ -408,7 +411,7 @@ export default function Stability({
     (filters.protocol === 'All' || row.program.protocol_name === filters.protocol) &&
     (filters.timePoint === 'All' || row.assignment.time_point_label === filters.timePoint) &&
     (filters.status === 'All' || row.status === filters.status) &&
-    (filters.analyst === 'All' || [row.assignment.assignee_id, row.assignment.trainee_id, row.assignment.reviewer_id].includes(filters.analyst)) &&
+    (filters.analyst === 'All' || [row.assignment.assignee_id, row.assignment.trainee_id, row.assignment.trainee_2_id, row.assignment.reviewer_id].includes(filters.analyst)) &&
     (filters.priority === 'All' || row.priority === filters.priority) &&
     (filters.dueWindow === 'All' || row.dueWindow === filters.dueWindow)
   ));
@@ -460,6 +463,9 @@ export default function Stability({
       if (assignment.assignee_id === assignment.reviewer_id) return `Reviewer must be different from main analyst for ${assignment.test_name}.`;
       if (assignment.trainee_id && assignment.trainee_id === assignment.assignee_id) return `Trainee must be different from main analyst for ${assignment.test_name}.`;
       if (assignment.trainee_id && assignment.trainee_id === assignment.reviewer_id) return `Trainee must be different from reviewer for ${assignment.test_name}.`;
+      if (assignment.trainee_2_id && assignment.trainee_2_id === assignment.assignee_id) return `Trainee 2 must be different from main analyst for ${assignment.test_name}.`;
+      if (assignment.trainee_2_id && assignment.trainee_2_id === assignment.reviewer_id) return `Trainee 2 must be different from reviewer for ${assignment.test_name}.`;
+      if (assignment.trainee_id && assignment.trainee_id === assignment.trainee_2_id) return `Select different trainees for ${assignment.test_name}.`;
       if (assignment.start_time < assignment.window_start || assignment.start_time > assignment.window_end) return `${assignment.test_name} scheduled date must be inside its testing window.`;
     }
     return '';
@@ -512,6 +518,7 @@ export default function Stability({
         workflow_step: `${assignment.time_point_label} stability test`,
         assignee_id: assignment.assignee_id,
         trainee_id: assignment.trainee_id || '',
+        trainee_2_id: assignment.trainee_2_id || '',
         reviewer_id: assignment.reviewer_id,
         start_time: assignment.start_time,
         end_time: '',

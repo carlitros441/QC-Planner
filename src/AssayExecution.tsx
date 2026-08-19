@@ -69,7 +69,7 @@ export default function AssayExecution({
     .filter(row => (
       (statusFilter === 'All' || (statusFilter === 'Open' ? !['Completed', 'Deleted'].includes(row.schedule.status) : row.schedule.status === statusFilter)) &&
       (readinessFilter === 'All' || row.state.label === readinessFilter) &&
-      (assigneeFilter === 'All' || row.schedule.assignee_id === assigneeFilter || row.schedule.reviewer_id === assigneeFilter || row.schedule.trainee_id === assigneeFilter) &&
+      (assigneeFilter === 'All' || row.schedule.assignee_id === assigneeFilter || row.schedule.reviewer_id === assigneeFilter || row.schedule.trainee_id === assigneeFilter || row.schedule.trainee_2_id === assigneeFilter) &&
       (!search || scheduleLabel(row.schedule).includes(search.toLowerCase()))
     ))
     .sort((left, right) => String(left.schedule.start_time || '').localeCompare(String(right.schedule.start_time || ''))), [schedules, resources, usages, activeUsages, statusFilter, readinessFilter, assigneeFilter, search]);

@@ -23,7 +23,7 @@ Theme: clean quality operations dashboard
 - Assay-level material, reagent, and equipment usage with GMP audit entries
 - EM Protocol test delta days from Day 0 Harvest
 - Dynamic assay workflow steps per protocol
-- Main analyst, optional trainee analyst, QC reviewer, and schedule dates
+- Main analyst, up to two optional trainee analysts, QC reviewer, and schedule dates
 - Calendar views: day, week, month, and list
 - Status badges and progress tracking
 - GMP audit/history log for schedule changes

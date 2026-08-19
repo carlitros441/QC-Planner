@@ -93,6 +93,7 @@ export interface Schedule extends BaseDoc {
   workflow_step?: string;
   assignee_id: string;
   trainee_id?: string;
+  trainee_2_id?: string;
   reviewer_id?: string;
   start_time: string;
   end_time?: string;
@@ -217,6 +218,7 @@ export interface StabilityAssignment {
   include: boolean;
   assignee_id: string;
   trainee_id?: string;
+  trainee_2_id?: string;
   reviewer_id: string;
   start_time: string;
   duration_days: number;
