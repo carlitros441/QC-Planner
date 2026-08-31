@@ -460,6 +460,8 @@ function CreateSchedule({ products, protocols, personnel, resources, refreshSche
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setMessage('');
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const sendNotifications = submitter?.value === 'send-notifications';
     if (!selectedProtocol) return;
     if (!form.harvest_day_zero) return setMessage('Select Harvest Day for this lot batch.');
     const included = Object.entries(configs).filter(([, config]) => config.include);
@@ -498,13 +500,13 @@ function CreateSchedule({ products, protocols, personnel, resources, refreshSche
           progress: 0,
           review_status: 'Not Ready',
           resource_requirements: getProtocolResourceRequirements(selectedProtocol, testName, resources),
-          email_status: 'pending',
+          email_status: sendNotifications ? 'pending' : 'drafted',
           created_by: currentUserInfo(user)
         };
         const id = await saveDoc('schedules', schedule);
-        await addAuditEntry(id, 'CREATE', null, schedule, 'Initial schedule creation', currentUserInfo(user));
+        await addAuditEntry(id, 'CREATE', null, schedule, sendNotifications ? 'Initial schedule creation with email notification' : 'Initial schedule creation without email notification', currentUserInfo(user));
       }));
-      setMessage('Schedules saved. Invite requests are pending.');
+      setMessage(sendNotifications ? 'Schedules saved. Email notifications are pending.' : 'Schedules saved without email notifications.');
       setForm({ product_id: '', product_name: '', batch_number: '', protocol_name: '', harvest_day_zero: '' });
       setConfigs({});
       await refreshSchedules();
@@ -542,7 +544,10 @@ function CreateSchedule({ products, protocols, personnel, resources, refreshSche
             </div>
           ))}
         </div>
-        <button className="primaryButton">Save Schedules</button>
+        <div className="wide modalActions">
+          <button type="submit" name="scheduleAction" value="save-only">Save Schedules</button>
+          <button className="primaryButton" type="submit" name="scheduleAction" value="send-notifications">Save &amp; Send Notifications</button>
+        </div>
         {message && <div className="infoBox">{message}</div>}
       </form>
     </section>
