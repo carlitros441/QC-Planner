@@ -56,12 +56,45 @@ export interface Protocol extends BaseDoc {
   resource_requirements?: Record<string, AssayResourceRequirement[]>;
 }
 
+export type QualificationStatus = 'Not Qualified' | 'In Training' | 'Qualified';
+export type TrainingRecordStatus = 'Planned' | 'Completed';
+export type TimeOffType = 'PTO' | 'Vacation' | 'Other';
+
+export interface AnalystTrainingRecord {
+  id: string;
+  training_date: string;
+  trainer: string;
+  activity: string;
+  status: TrainingRecordStatus;
+  notes?: string;
+}
+
+export interface AnalystAssayQualification {
+  id: string;
+  assay_name: string;
+  status: QualificationStatus;
+  release_date?: string;
+  released_by?: string;
+  notes?: string;
+  training_records: AnalystTrainingRecord[];
+}
+
+export interface PersonnelTimeOff {
+  id: string;
+  type: TimeOffType;
+  start_date: string;
+  end_date: string;
+  notes?: string;
+}
+
 export interface Personnel extends BaseDoc {
   name: string;
   email: string;
   role: Role;
   initials?: string;
   active: boolean;
+  assay_qualifications?: AnalystAssayQualification[];
+  time_off?: PersonnelTimeOff[];
 }
 
 export interface AccessProfile extends BaseDoc {

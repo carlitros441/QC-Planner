@@ -24,6 +24,8 @@ Theme: clean quality operations dashboard
 - EM Protocol test delta days from Day 0 Harvest
 - Dynamic assay workflow steps per protocol
 - Main analyst, up to two optional trainee analysts, QC reviewer, and schedule dates
+- Assay-specific analyst qualifications with training records and independent release status
+- Future analyst PTO/vacation tracking and qualified-analyst rolling auto-assignment
 - Calendar views: day, week, month, and list
 - Status badges and progress tracking
 - GMP audit/history log for schedule changes

@@ -26,7 +26,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -36,7 +37,8 @@ button {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 40px;
   border: 1px solid var(--line);
@@ -44,6 +46,11 @@ select {
   padding: 8px 10px;
   background: white;
   color: var(--ink);
+}
+
+textarea {
+  min-height: 72px;
+  resize: vertical;
 }
 
 label {
@@ -256,6 +263,28 @@ aside button:hover {
   cursor: not-allowed;
 }
 
+.autoAssignButton,
+.qualificationAddRow button,
+.personnelQualificationPanel button,
+.compactActions button {
+  min-height: 40px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: #eef1f4;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.autoAssignButton:disabled,
+.personnelQualificationPanel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .metricGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -431,6 +460,10 @@ aside button:hover {
   border-radius: 8px;
   margin-bottom: 10px;
   background: #fbfcfd;
+}
+
+.testConfig {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .checkLine {
@@ -785,6 +818,117 @@ aside button:hover {
   font-weight: 800;
 }
 
+.personnelQualificationPanel {
+  display: grid;
+  gap: 12px;
+}
+
+.personnelQualificationPanel h3,
+.personnelQualificationPanel h4,
+.personnelQualificationPanel small,
+.personnelQualificationPanel p {
+  margin: 0;
+}
+
+.personnelQualificationPanel small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.qualificationAddRow {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 10px;
+}
+
+.qualificationList {
+  display: grid;
+  gap: 12px;
+}
+
+.qualificationEditor {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--brand-red);
+  border-radius: 6px;
+  background: white;
+}
+
+.qualificationHeader,
+.qualificationHeader > div,
+.compactActions,
+.releaseRecord {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qualificationHeader {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.compactActions {
+  flex-wrap: wrap;
+}
+
+.qualificationStatus {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.qualification-qualified {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.qualification-in-training {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.qualification-not-qualified {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.releaseRecord {
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #edf9f1;
+  color: #166534;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.trainingHeader {
+  margin: 0;
+}
+
+.trainingRecord {
+  display: grid;
+  grid-template-columns: 135px minmax(150px, 0.8fr) minmax(180px, 1fr) 125px minmax(180px, 1fr) 42px;
+  gap: 8px;
+  align-items: center;
+}
+
+.timeOffRecord {
+  display: grid;
+  grid-template-columns: 130px 150px 150px minmax(180px, 1fr) 42px;
+  gap: 8px;
+  align-items: center;
+}
+
 .resourceBadge {
   display: inline-flex;
   align-items: center;
@@ -954,7 +1098,10 @@ progress {
     .resourceFilters,
     .assayResourceFilters,
     .resourceRequirementRow,
-    .resourceUsageForm {
+    .resourceUsageForm,
+    .qualificationAddRow,
+    .trainingRecord,
+    .timeOffRecord {
     grid-template-columns: 1fr;
   }
 
