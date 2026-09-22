@@ -1118,7 +1118,7 @@ progress {
 .multiFilter:last-child .multiFilterMenu { left: auto; right: 0; }
 .multiFilterMenu label { display: flex; align-items: flex-start; gap: 8px; padding: 8px 4px; color: #24333a; overflow-wrap: anywhere; cursor: pointer; }
 .multiFilterMenu label:hover { background: #f0f3f5; }
-.multiFilterMenu input[type=checkbox] { width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
+.multiFilterMenu input[type=checkbox] { width: 16px; height: 16px; min-height: 16px; padding: 0; margin: 0; flex-shrink: 0; }
 .assignmentExplanation { grid-column: 1 / -1; min-width: 0; border-top: 1px solid #d7dfe5; padding-top: 8px; font-size: 13px; color: #354650; overflow-wrap: anywhere; }
 .assignmentExplanation p { margin: 4px 0 8px; }
 .assignmentExplanation summary { cursor: pointer; color: #8f1230; font-weight: 600; }
