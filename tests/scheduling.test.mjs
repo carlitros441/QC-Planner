@@ -10,6 +10,25 @@ async function loadSource(file) {
   return module.exports;
 }
 const { filterSchedules } = await loadSource('src/scheduleFilters.ts');
+const { defaultColumnLayout, normalizeColumnLayout, reorderColumn } = await loadSource('src/ScheduleColumns.tsx');
+test('Saved column layouts recover unknown columns, duplicate IDs, invalid widths and all-hidden state', () => {
+  const layout = normalizeColumnLayout({ order: ['status', 'status', 'obsolete'], hidden: defaultColumnLayout().order, widths: { status: 20, product: 5000, assignee: 'bad' } });
+  assert.equal(layout.order[0], 'status');
+  assert.equal(new Set(layout.order).size, 11);
+  assert.equal(layout.hidden.length, 0);
+  assert.equal(layout.widths.status, 90);
+  assert.equal(layout.widths.product, 800);
+  assert.equal(layout.widths.assignee, 170);
+});
+test('Moving columns in either direction preserves widths and visibility', () => {
+  const original = { ...defaultColumnLayout(), hidden: ['trainees'] };
+  const moved = reorderColumn(original, 'actions', 'test_name');
+  assert.equal(moved.order[0], 'actions');
+  assert.deepEqual(moved.hidden, original.hidden);
+  assert.deepEqual(moved.widths, original.widths);
+  assert.deepEqual(reorderColumn(moved, 'actions', 'email_status').order, original.order);
+  assert.equal(original.order[0], 'test_name');
+});
 const { rankedAnalystsForAssay, rollingAssigneeForAssay } = await loadSource('src/PersonnelQualifications.tsx');
 const filters = { status: [], assignee: [], protocol: [], product: [], batch: [], test: [] };
 const rows = [

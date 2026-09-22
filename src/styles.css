@@ -1124,3 +1124,26 @@ progress {
 .assignmentExplanation summary { cursor: pointer; color: #8f1230; font-weight: 600; }
 .assignmentExplanation li { margin: 7px 0; }
 .assignmentExplanation h4 { font-size: 13px; margin-bottom: 4px; }
+.columnSettings { width: 100%; }
+.columnSettings > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; width: fit-content; padding: 8px 12px; border: 1px solid #ccd5dd; border-radius: 4px; font-weight: 700; }
+.columnSettingsBody { max-width: 600px; padding: 12px 0; }
+.columnSettingsHeading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.columnSettingsHeading button { display: flex; gap: 6px; align-items: center; }
+.columnSettingRow { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 32px 100px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid #d7dfe5; }
+.columnSettingRow > label:first-child { display: flex; align-items: center; gap: 8px; }
+.columnSettingRow input[type=checkbox] { width: 16px; height: 16px; min-height: 16px; padding: 0; margin: 0; flex-shrink: 0; }
+.columnSettingRow > button { display: grid; place-items: center; width: 32px; height: 32px; background: #edf1f4; border-radius: 4px; }
+.columnSettingRow > button:disabled { opacity: .4; cursor: default; }
+.columnWidthInput { gap: 2px; font-size: 11px; }
+.columnWidthInput input { min-height: 32px; padding: 4px 6px; }
+.scheduleTable { table-layout: fixed; }
+.scheduleTable .progressStack { max-width: 100%; }
+.scheduleTable .actions { min-width: 0; }
+.scheduleTable th, .scheduleTable td { overflow-wrap: anywhere; }
+.scheduleTable .actions button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.scheduleTable .badge, .scheduleTable .mailBadge { max-width: 100%; white-space: normal; }
+.scheduleColumnHeading { display: flex; align-items: center; gap: 4px; padding-right: 4px; min-width: 0; }
+.columnDragHandle { display: flex; cursor: grab; flex-shrink: 0; color: #687783; }
+.scheduleTable .columnResizeHandle { touch-action: none; border-right: 2px solid #b5c2cb; }
+.scheduleTable .columnResizeHandle:hover, .scheduleTable .columnResizeHandle:focus-visible { border-right-color: #a51130; background: #a511301a; }
+@media (max-width: 420px) { .columnSettingRow { grid-template-columns: minmax(80px, 1fr) 28px 28px 76px; gap: 4px; } }

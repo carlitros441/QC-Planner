@@ -1,4 +1,4 @@
-import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, signInWithEmailAndPassword, signOut, updatePassword, User } from 'firebase/auth';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -26,6 +26,7 @@ import { auth, hasFirebaseConfig } from './firebase';
 import { addAuditEntry, addDays, displayTimestamp, formatDate, getOne, listDocs, loadAuditTrail, removeDoc, saveDoc } from './data';
 import AssayExecution from './AssayExecution';
 import MultiSelectFilter from './MultiSelectFilter';
+import { ColumnSettings, reorderColumn, scheduleColumns, ScheduleColumnHeader, useScheduleColumns } from './ScheduleColumns';
 import { filterSchedules } from './scheduleFilters';
 import LabResources, { AssayResourcesModal, normalizeRequirements, ResourceRequirementEditor } from './LabResources';
 import { AssignmentExplanation, PersonnelQualificationEditor, qualifiedAnalystsForAssay, rollingAssigneeForAssay, trainingAnalystsForAssay } from './PersonnelQualifications';
@@ -603,19 +604,7 @@ function Schedules({ schedules, personnel, refreshSchedules, user, canManageSche
   const [edit, setEdit] = useState<Schedule | null>(null);
   const [audit, setAudit] = useState<Schedule | null>(null);
   const [sort, setSort] = useState<{ field: string; direction: 'asc' | 'desc' }>({ field: 'start_time', direction: 'asc' });
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
-    test_name: 220,
-    product: 180,
-    batch_number: 145,
-    assignee: 170,
-    trainees: 200,
-    reviewer: 170,
-    start_time: 135,
-    progress: 170,
-    status: 145,
-    email_status: 120,
-    actions: 320
-  });
+  const { layout, setLayout, visible: visibleColumns, resize } = useScheduleColumns(user?.uid || 'guest');
   const getAssigneeName = (assigneeId: string) => personnel.find(person => person.id === assigneeId)?.name || 'Unassigned';
   const getTraineeName = (traineeId?: string) => traineeId ? personnel.find(person => person.id === traineeId)?.name || 'None' : 'None';
   const getReviewerName = (reviewerId?: string) => personnel.find(person => person.id === reviewerId)?.name || 'Unassigned';
@@ -635,27 +624,6 @@ function Schedules({ schedules, personnel, refreshSchedules, user, canManageSche
     return sort.direction === 'asc' ? String(left).localeCompare(String(right)) : String(right).localeCompare(String(left));
   });
   const sortLabel = (field: string) => sort.field === field ? (sort.direction === 'asc' ? ' ^' : ' v') : '';
-  const startColumnResize = (field: string, event: ReactMouseEvent<HTMLSpanElement>) => {
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = columnWidths[field] || 140;
-    const move = (moveEvent: globalThis.MouseEvent) => {
-      const width = Math.max(90, startWidth + moveEvent.clientX - startX);
-      setColumnWidths(current => ({ ...current, [field]: width }));
-    };
-    const stop = () => {
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', stop);
-    };
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', stop);
-  };
-  const sortableHeader = (field: string, label: string) => (
-    <th className="resizableHeader">
-      <button className="sortHeader" onClick={() => toggleSort(field)}>{label}{sortLabel(field)}</button>
-      <span className="columnResizeHandle" onMouseDown={event => startColumnResize(field, event)} />
-    </th>
-  );
 
   const saveSchedule = async (schedule: Schedule, action: string) => {
     if (!canManageSchedules && !['TEST_COMPLETE', 'REVIEW_COMPLETE'].includes(action)) return;
@@ -695,26 +663,36 @@ function Schedules({ schedules, personnel, refreshSchedules, user, canManageSche
     <section className="screen">
       <div className="screenHeader"><div><p className="eyebrow">Execution control</p><h1>Schedules</h1></div></div>
       <FiltersBar schedules={schedules} personnel={personnel} filters={filters} setFilters={setFilters} />
+      <ColumnSettings layout={layout} setLayout={setLayout} resize={resize} />
       <div className="tableWrap">
-        <table>
+        <table className="scheduleTable" style={{ width: visibleColumns.reduce((sum, id) => sum + layout.widths[id], 0) }}>
           <colgroup>
-            {['test_name', 'product', 'batch_number', 'assignee', 'trainees', 'reviewer', 'start_time', 'progress', 'status', 'email_status', 'actions'].map(field => <col key={field} style={{ width: `${columnWidths[field]}px` }} />)}
+            {visibleColumns.map(field => <col key={field} style={{ width: `${layout.widths[field]}px` }} />)}
           </colgroup>
-          <thead><tr>{sortableHeader('test_name', 'Test')}{sortableHeader('product', 'Product')}{sortableHeader('batch_number', 'Batch')}{sortableHeader('assignee', 'Main Analyst')}{sortableHeader('trainees', 'Trainees')}{sortableHeader('reviewer', 'QC Reviewer')}{sortableHeader('start_time', 'Date')}{sortableHeader('progress', 'Progress')}{sortableHeader('status', 'Status')}{sortableHeader('email_status', 'Email')}<th>Actions</th></tr></thead>
+          <thead><tr>{visibleColumns.map(field => {
+            const column = scheduleColumns.find(item => item.id === field)!;
+            return <ScheduleColumnHeader key={field} id={field} label={column.label} width={layout.widths[field]} onResize={width => resize(field, width)} onMove={(source, target) => setLayout(current => reorderColumn(current, source, target))} sort={sort.field === field ? sort.direction === 'asc' ? 'ascending' : 'descending' : undefined}>
+              {field === 'actions' ? <span>{column.label}</span> : <button className="sortHeader" onClick={() => toggleSort(field)}>{column.label}{sortLabel(field)}</button>}
+            </ScheduleColumnHeader>;
+          })}</tr></thead>
           <tbody>
-            {filtered.map(schedule => <tr key={schedule.id}>
-              <td><strong>{schedule.test_name}</strong><small>{schedule.workflow_step || schedule.protocol_name}</small><small>QC Sample ID: {schedule.qc_sample_id || 'Not set'}</small></td>
-              <td>{schedule.product_name || schedule.product_id}</td>
-              <td>{schedule.batch_number}</td>
-              <td>{getAssigneeName(schedule.assignee_id)}</td>
-              <td>{[schedule.trainee_id, schedule.trainee_2_id].filter(Boolean).map(getTraineeName).join(', ') || 'None'}</td>
-              <td>{getReviewerName(schedule.reviewer_id)}<small>{schedule.review_status || 'Not Ready'}</small></td>
-              <td>{formatDate(schedule.start_time)}</td>
-              <td><ProgressBar schedule={schedule} /></td>
-              <td><StatusBadge status={schedule.status} /></td>
-              <td><EmailBadge status={schedule.email_status} /></td>
-              <td className="actions">{canManageSchedules && <button onClick={() => setEdit(schedule)}>Edit</button>}<button onClick={() => onOpenResources(schedule)}>Resources</button>{canExecuteWorkflow && ['Scheduled', 'In Progress'].includes(schedule.status) && <button onClick={() => completeTest(schedule)}>Test Complete</button>}{canExecuteWorkflow && schedule.status === 'Pending Review' && <button onClick={() => completeReview(schedule)}>Review Complete</button>}{canManageSchedules && <button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button>}{canSendInvites && <button onClick={() => sendUpdatedInvite(schedule)}>Send Updated Invite</button>}<button onClick={() => setAudit(schedule)}>Audit</button></td>
-            </tr>)}
+            {filtered.map(schedule => {
+              const cells: Record<string, React.ReactNode> = {
+                test_name: <><strong>{schedule.test_name}</strong><small>{schedule.workflow_step || schedule.protocol_name}</small><small>QC Sample ID: {schedule.qc_sample_id || 'Not set'}</small></>,
+                product: schedule.product_name || schedule.product_id,
+                batch_number: schedule.batch_number,
+                assignee: getAssigneeName(schedule.assignee_id),
+                trainees: [schedule.trainee_id, schedule.trainee_2_id].filter(Boolean).map(getTraineeName).join(', ') || 'None',
+                reviewer: <>{getReviewerName(schedule.reviewer_id)}<small>{schedule.review_status || 'Not Ready'}</small></>,
+                start_time: formatDate(schedule.start_time),
+                progress: <ProgressBar schedule={schedule} />,
+                status: <StatusBadge status={schedule.status} />,
+                email_status: <EmailBadge status={schedule.email_status} />,
+                actions: <>{canManageSchedules && <button onClick={() => setEdit(schedule)}>Edit</button>}<button onClick={() => onOpenResources(schedule)}>Resources</button>{canExecuteWorkflow && ['Scheduled', 'In Progress'].includes(schedule.status) && <button onClick={() => completeTest(schedule)}>Test Complete</button>}{canExecuteWorkflow && schedule.status === 'Pending Review' && <button onClick={() => completeReview(schedule)}>Review Complete</button>}{canManageSchedules && <button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button>}{canSendInvites && <button onClick={() => sendUpdatedInvite(schedule)}>Send Updated Invite</button>}<button onClick={() => setAudit(schedule)}>Audit</button></>
+              };
+              return <tr key={schedule.id}>{visibleColumns.map(field => <td key={field} className={field === 'actions' ? 'actions' : undefined}>{cells[field]}</td>)}</tr>;
+            })}
+            {!filtered.length && <tr><td colSpan={visibleColumns.length}>No schedules match the selected filters.</td></tr>}
           </tbody>
         </table>
       </div>
