@@ -26,6 +26,7 @@ import { auth, hasFirebaseConfig } from './firebase';
 import { addAuditEntry, addDays, displayTimestamp, formatDate, getOne, listDocs, loadAuditTrail, removeDoc, saveDoc } from './data';
 import AssayExecution from './AssayExecution';
 import MultiSelectFilter from './MultiSelectFilter';
+import { executionAfterHarvest, nextBusinessDay } from './businessDays';
 import { ColumnSettings, reorderColumn, scheduleColumns, ScheduleColumnHeader, useScheduleColumns } from './ScheduleColumns';
 import { filterSchedules } from './scheduleFilters';
 import LabResources, { AssayResourcesModal, normalizeRequirements, ResourceRequirementEditor } from './LabResources';
@@ -424,6 +425,7 @@ function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; 
 function CreateSchedule({ products, protocols, personnel, schedules, resources, refreshSchedules, user }: { products: Product[]; protocols: Protocol[]; personnel: Personnel[]; schedules: Schedule[]; resources: LabResource[]; refreshSchedules: () => Promise<void>; user: User | null }) {
   const [form, setForm] = useState({ product_id: '', product_name: '', batch_number: '', protocol_name: '', harvest_day_zero: '' });
   const [configs, setConfigs] = useState<Record<string, ScheduleTestConfig>>({});
+  const [autoExecutionDay, setAutoExecutionDay] = useState(false);
   const [message, setMessage] = useState('');
   const selectedProduct = products.find(product => product.id === form.product_id);
   const options = protocols.filter(protocol => protocol.product_id === form.product_id || protocol.product_name === selectedProduct?.name);
@@ -468,7 +470,7 @@ function CreateSchedule({ products, protocols, personnel, schedules, resources, 
     const tests = protocol?.protocol_type === 'EM Protocol' && protocol.em_tests?.length ? protocol.em_tests.map(item => item.name) : protocol?.tests || [];
     const deltaByName = (protocol?.em_tests || []).reduce<Record<string, number>>((acc, item) => ({ ...acc, [item.name]: Number(item.delta_day || 0) }), {});
     setConfigs(Object.fromEntries(tests.map(test => {
-      const startTime = protocol?.protocol_type === 'EM Protocol' && form.harvest_day_zero ? addDays(form.harvest_day_zero, deltaByName[test] || 0) : '';
+      const startTime = protocol?.protocol_type === 'EM Protocol' ? (form.harvest_day_zero ? addDays(form.harvest_day_zero, deltaByName[test] || 0) : '') : autoExecutionDay ? nextBusinessDay(form.harvest_day_zero) : '';
       const config: ScheduleTestConfig = { include: protocol?.protocol_type === 'EM Protocol', assignee_id: '', trainee_id: '', trainee_2_id: '', reviewer_id: '', is_all_day: true, start_time: startTime, end_time: '', duration_days: 1, delta_day: deltaByName[test] || 0, workflow_step: protocol?.workflow_steps?.[0]?.name || '', qc_sample_id: getProtocolSampleId(protocol, test) };
       config.assignee_id = rollingAssigneeForAssay(personnel, schedules, test, startTime, 1);
       return [test, config];
@@ -477,9 +479,20 @@ function CreateSchedule({ products, protocols, personnel, schedules, resources, 
 
   const updateHarvest = (value: string) => {
     setForm({ ...form, harvest_day_zero: value });
-    if (!isEm) return;
+    if (!isEm && !autoExecutionDay) return;
     setConfigs(prev => Object.fromEntries(Object.entries(prev).map(([test, config]) => {
-      let nextConfig = { ...config, include: true, start_time: addDays(value, config.delta_day) };
+      let nextConfig = isEm ? { ...config, include: true, start_time: addDays(value, config.delta_day) } : executionAfterHarvest(config, value);
+      nextConfig.assignee_id = preferredAssignee(test, nextConfig);
+      nextConfig = reconcileTraineeAvailability(test, nextConfig);
+      return [test, nextConfig];
+    })));
+  };
+
+  const toggleAutoExecutionDay = (enabled: boolean) => {
+    setAutoExecutionDay(enabled);
+    if (!enabled || isEm) return;
+    setConfigs(current => Object.fromEntries(Object.entries(current).map(([test, config]) => {
+      let nextConfig = executionAfterHarvest(config, form.harvest_day_zero);
       nextConfig.assignee_id = preferredAssignee(test, nextConfig);
       nextConfig = reconcileTraineeAvailability(test, nextConfig);
       return [test, nextConfig];
@@ -541,6 +554,7 @@ function CreateSchedule({ products, protocols, personnel, schedules, resources, 
       setMessage(sendNotifications ? 'Schedules saved. Email notifications are pending.' : 'Schedules saved without email notifications.');
       setForm({ product_id: '', product_name: '', batch_number: '', protocol_name: '', harvest_day_zero: '' });
       setConfigs({});
+      setAutoExecutionDay(false);
       await refreshSchedules();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to save schedules.');
@@ -555,6 +569,10 @@ function CreateSchedule({ products, protocols, personnel, schedules, resources, 
         <label>Batch Number<input required value={form.batch_number} onChange={event => setForm({ ...form, batch_number: event.target.value })} /></label>
         <label>Protocol Name<select required disabled={!form.product_id} value={form.protocol_name} onChange={event => chooseProtocol(event.target.value)}><option value="">Select protocol</option>{options.map(protocol => <option key={protocol.id}>{protocol.name}</option>)}</select></label>
         <label>{isEm ? 'Day 0 Harvest' : 'Harvest Day'}<input type="date" required value={form.harvest_day_zero} onChange={event => updateHarvest(event.target.value)} /></label>
+        {!isEm && <div className="wide executionDayOption">
+          <label className="checkLine"><input type="checkbox" checked={autoExecutionDay} onChange={event => toggleAutoExecutionDay(event.target.checked)} />Next business day after harvest (Mon-Fri)</label>
+          {autoExecutionDay && <span>{nextBusinessDay(form.harvest_day_zero) ? `Execution day: ${nextBusinessDay(form.harvest_day_zero)}` : 'Select a harvest day'}</span>}
+        </div>}
         <div className="wide">
           {Object.entries(configs).map(([testName, config]) => (
             <div className="testConfig" key={testName}>
@@ -576,8 +594,13 @@ function CreateSchedule({ products, protocols, personnel, schedules, resources, 
                 }} />
                 <input type="date" disabled value={config.start_time} />
               </> : <>
-                <label className="checkLine"><input type="checkbox" checked={config.is_all_day} onChange={event => setConfigs({ ...configs, [testName]: { ...config, is_all_day: event.target.checked } })} />All day</label>
-                <input type={config.is_all_day ? 'date' : 'datetime-local'} disabled={!config.include} required={config.include} value={config.start_time} onChange={event => updateTestDate(testName, config, event.target.value)} />
+                <label className="checkLine"><input type="checkbox" checked={config.is_all_day} onChange={event => {
+                  let nextConfig = { ...config, is_all_day: event.target.checked };
+                  if (autoExecutionDay) nextConfig = executionAfterHarvest(nextConfig, form.harvest_day_zero);
+                  nextConfig.assignee_id = preferredAssignee(testName, nextConfig);
+                  setConfigs({ ...configs, [testName]: reconcileTraineeAvailability(testName, nextConfig) });
+                }} />All day</label>
+                <input aria-label={`${testName} execution date`} type={config.is_all_day ? 'date' : 'datetime-local'} readOnly={autoExecutionDay && config.is_all_day} disabled={!config.include} required={config.include} value={config.start_time} onChange={event => updateTestDate(testName, config, autoExecutionDay ? executionAfterHarvest({ ...config, start_time: event.target.value }, form.harvest_day_zero).start_time : event.target.value)} />
                 {config.is_all_day ? <select value={config.duration_days} onChange={event => {
                   let nextConfig = { ...config, duration_days: Number(event.target.value) };
                   nextConfig.assignee_id = preferredAssignee(testName, nextConfig);

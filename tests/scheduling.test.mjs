@@ -10,6 +10,19 @@ async function loadSource(file) {
   return module.exports;
 }
 const { filterSchedules } = await loadSource('src/scheduleFilters.ts');
+const { nextBusinessDay, executionAfterHarvest } = await loadSource('src/businessDays.ts');
+test('Execution starts strictly after harvest and skips weekends and year boundaries', () => {
+  for (const [harvest, expected] of [['2026-09-21', '2026-09-22'], ['2026-09-24', '2026-09-25'], ['2026-09-25', '2026-09-28'], ['2026-09-26', '2026-09-28'], ['2026-09-27', '2026-09-28'], ['2027-12-31', '2028-01-03'], ['2028-02-28', '2028-02-29']]) assert.equal(nextBusinessDay(harvest), expected);
+  assert.equal(nextBusinessDay(''), '');
+  assert.equal(nextBusinessDay('2026-02-30'), '');
+});
+test('Auto dates preserve timed assay clock times and overnight duration', () => {
+  const timed = executionAfterHarvest({ is_all_day: false, start_time: '2026-09-22T22:00', end_time: '2026-09-23T02:00' }, '2026-09-25');
+  assert.equal(timed.start_time, '2026-09-28T22:00');
+  assert.equal(timed.end_time, '2026-09-29T02:00');
+  assert.equal(executionAfterHarvest({ ...timed, is_all_day: true }, '2026-09-25').start_time, '2026-09-28');
+  assert.equal(executionAfterHarvest(timed, '').start_time, '');
+});
 const { defaultColumnLayout, normalizeColumnLayout, reorderColumn } = await loadSource('src/ScheduleColumns.tsx');
 test('Saved column layouts recover unknown columns, duplicate IDs, invalid widths and all-hidden state', () => {
   const layout = normalizeColumnLayout({ order: ['status', 'status', 'obsolete'], hidden: defaultColumnLayout().order, widths: { status: 20, product: 5000, assignee: 'bad' } });

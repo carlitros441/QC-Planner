@@ -1147,3 +1147,5 @@ progress {
 .scheduleTable .columnResizeHandle { touch-action: none; border-right: 2px solid #b5c2cb; }
 .scheduleTable .columnResizeHandle:hover, .scheduleTable .columnResizeHandle:focus-visible { border-right-color: #a51130; background: #a511301a; }
 @media (max-width: 420px) { .columnSettingRow { grid-template-columns: minmax(80px, 1fr) 28px 28px 76px; gap: 4px; } }
+.executionDayOption { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 8px 0; }
+.executionDayOption > span { font-size: 13px; font-weight: 600; color: #354650; }
