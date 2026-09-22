@@ -39,9 +39,8 @@ export const trainingAnalystsForAssay = (personnel: Personnel[], assayName: stri
     && isAvailableForAssayDates(person, startDate, durationDays))
 );
 
-export const rollingAssigneeForAssay = (personnel: Personnel[], schedules: Schedule[], assayName: string, startDate?: string, durationDays = 1) => {
+export const rankedAnalystsForAssay = (personnel: Personnel[], schedules: Schedule[], assayName: string, startDate?: string, durationDays = 1) => {
   const candidates = qualifiedAnalystsForAssay(personnel, assayName, startDate, durationDays);
-  if (!candidates.length) return '';
   const assayKey = normalizeAssayName(assayName);
   const lastAssignment = new Map<string, string>();
   schedules.forEach(schedule => {
@@ -53,9 +52,42 @@ export const rollingAssigneeForAssay = (personnel: Personnel[], schedules: Sched
   return [...candidates]
     .sort((left, right) => {
       const dateComparison = String(lastAssignment.get(left.id) || '').localeCompare(String(lastAssignment.get(right.id) || ''));
-      return dateComparison || left.name.localeCompare(right.name);
-    })[0].id;
+      return dateComparison || left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
+    }).map(person => ({ person, lastAssignment: lastAssignment.get(person.id) || '' }));
 };
+
+export const rollingAssigneeForAssay = (personnel: Personnel[], schedules: Schedule[], assayName: string, startDate?: string, durationDays = 1) => (
+  rankedAnalystsForAssay(personnel, schedules, assayName, startDate, durationDays)[0]?.person.id || ''
+);
+
+export function AssignmentExplanation({ personnel, schedules, assayName, startDate, durationDays, selectedId }: {
+  personnel: Personnel[]; schedules: Schedule[]; assayName: string; startDate: string; durationDays: number; selectedId: string;
+}) {
+  const ranked = rankedAnalystsForAssay(personnel, schedules, assayName, startDate, durationDays);
+  const selectedRank = ranked.findIndex(item => item.person.id === selectedId);
+  const selected = ranked[selectedRank];
+  const excluded = personnel.filter(person => !ranked.some(item => item.person.id === person.id));
+  const start = dateOnly(startDate);
+  const end = start ? endDateForDuration(start, durationDays) : '';
+  const exclusionReason = (person: Personnel) => {
+    if (person.active === false) return 'Inactive';
+    const qualification = qualificationForAssay(person, assayName);
+    if (qualification?.status !== 'Qualified') return qualification?.status || 'No qualification recorded';
+    return (person.time_off || []).filter(period => period.start_date <= end && period.end_date >= start)
+      .map(period => `${period.type}: ${period.start_date} to ${period.end_date}`).join('; ');
+  };
+  return <div className="assignmentExplanation" aria-live="polite">
+    <p>{selected ? <><strong>{selected.person.name}</strong> is #{selectedRank + 1} of {ranked.length} in the eligible rotation. {selectedRank === 0 ? 'First in line for automatic assignment.' : `Current selection retained; ${ranked[0].person.name} is next in line.`}</> : 'No eligible analyst selected.'} {start ? `PTO checked for ${start} to ${end}.` : 'Select an execution date to check PTO availability.'}</p>
+    <details>
+      <summary>Selection order and availability</summary>
+      <p>Qualified, active analysts with no overlapping recorded time off are ranked by their most recent scheduled date for this assay, oldest first. Analysts with no previous assignment come first; ties use alphabetical name order. Workload conflicts are not checked.</p>
+      {ranked.length > 0 ? <ol>{ranked.map(item => <li key={item.person.id}>
+        <strong>{item.person.name}{item.person.id === selectedId ? ' (selected)' : ''}</strong> &middot; Qualified &middot; {start ? 'No PTO conflict' : 'PTO not checked'} &middot; {item.lastAssignment ? `Last scheduled: ${dateOnly(item.lastAssignment)}` : 'No previous assignment'}
+      </li>)}</ol> : <p>No qualified analysts available for these dates.</p>}
+      {excluded.length > 0 && <><h4>Excluded analysts</h4><ul>{excluded.map(person => <li key={person.id}><strong>{person.name}</strong> &middot; {exclusionReason(person)}</li>)}</ul></>}
+    </details>
+  </div>;
+}
 
 export function PersonnelQualificationEditor({
   person,

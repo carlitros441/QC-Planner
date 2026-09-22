@@ -25,8 +25,10 @@ import {
 import { auth, hasFirebaseConfig } from './firebase';
 import { addAuditEntry, addDays, displayTimestamp, formatDate, getOne, listDocs, loadAuditTrail, removeDoc, saveDoc } from './data';
 import AssayExecution from './AssayExecution';
+import MultiSelectFilter from './MultiSelectFilter';
+import { filterSchedules } from './scheduleFilters';
 import LabResources, { AssayResourcesModal, normalizeRequirements, ResourceRequirementEditor } from './LabResources';
-import { PersonnelQualificationEditor, qualifiedAnalystsForAssay, rollingAssigneeForAssay, trainingAnalystsForAssay } from './PersonnelQualifications';
+import { AssignmentExplanation, PersonnelQualificationEditor, qualifiedAnalystsForAssay, rollingAssigneeForAssay, trainingAnalystsForAssay } from './PersonnelQualifications';
 import Stability from './Stability';
 import type { AccessLevel, AccessProfile, AdminSetting, AssayResourceRequirement, AssayResourceUsage, AuditEntry, EmTest, Filters, LabResource, Personnel, Product, Protocol, ProtocolType, Role, Schedule, StabilityProgram, StabilityProtocol, Status, WorkflowStep } from './types';
 
@@ -34,7 +36,7 @@ type Tab = 'Dashboard' | 'Create Schedule' | 'Schedules' | 'Calendar' | 'QC Stab
 type Draft<T> = Partial<T> & { id?: string };
 type ScheduleTestConfig = { include: boolean; assignee_id: string; trainee_id: string; trainee_2_id: string; reviewer_id: string; is_all_day: boolean; start_time: string; end_time: string; duration_days: number; delta_day: number; workflow_step: string; qc_sample_id: string };
 
-const emptyFilters: Filters = { status: 'All', assignee: 'All', protocol: 'All', product: 'All', batch: 'All', test: 'All' };
+const emptyFilters: Filters = { status: [], assignee: [], protocol: [], product: [], batch: [], test: [] };
 const statusOrder: Status[] = ['Scheduled', 'In Progress', 'Pending Review', 'Completed', 'Deleted'];
 const defaultSettings: AdminSetting = {
   id: 'general',
@@ -270,17 +272,6 @@ function ChangePasswordModal({ user, onClose }: { user: User; onClose: () => voi
   );
 }
 
-function filterSchedules(schedules: Schedule[], filters: Filters) {
-  return schedules.filter(schedule =>
-    (filters.status === 'All' || schedule.status === filters.status) &&
-    (filters.assignee === 'All' || [schedule.assignee_id, schedule.trainee_id, schedule.trainee_2_id].includes(filters.assignee)) &&
-    (filters.protocol === 'All' || schedule.protocol_name === filters.protocol) &&
-    (filters.product === 'All' || (schedule.product_name || schedule.product_id) === filters.product) &&
-    (filters.batch === 'All' || schedule.batch_number === filters.batch) &&
-    (filters.test === 'All' || schedule.test_name === filters.test)
-  );
-}
-
 function FiltersBar({ schedules, personnel, filters, setFilters }: { schedules: Schedule[]; personnel: Personnel[]; filters: Filters; setFilters: (filters: Filters) => void }) {
   const protocols = [...new Set(schedules.map(item => item.protocol_name).filter(Boolean))];
   const products = [...new Set(schedules.map(item => item.product_name || item.product_id).filter(Boolean))];
@@ -288,12 +279,10 @@ function FiltersBar({ schedules, personnel, filters, setFilters }: { schedules: 
   const tests = [...new Set(schedules.map(item => item.test_name).filter(Boolean))];
   return (
     <div className="filtersBar">
-      <label>Status<select value={filters.status} onChange={event => setFilters({ ...filters, status: event.target.value })}><option>All</option>{statusOrder.map(status => <option key={status}>{status}</option>)}</select></label>
-      <label>Assigned Analyst<select value={filters.assignee} onChange={event => setFilters({ ...filters, assignee: event.target.value })}><option value="All">All</option>{personnel.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
-      <label>Protocol<select value={filters.protocol} onChange={event => setFilters({ ...filters, protocol: event.target.value })}><option>All</option>{protocols.map(item => <option key={item}>{item}</option>)}</select></label>
-      <label>Product<select value={filters.product} onChange={event => setFilters({ ...filters, product: event.target.value })}><option>All</option>{products.map(item => <option key={item}>{item}</option>)}</select></label>
-      <label>Batch<select value={filters.batch} onChange={event => setFilters({ ...filters, batch: event.target.value })}><option>All</option>{batches.map(item => <option key={item}>{item}</option>)}</select></label>
-      <label>Test<select value={filters.test} onChange={event => setFilters({ ...filters, test: event.target.value })}><option>All</option>{tests.map(item => <option key={item}>{item}</option>)}</select></label>
+      {([{ key: 'status', label: 'Status', options: statusOrder.map(value => ({ value, label: value })) },
+        { key: 'assignee', label: 'Assigned Analyst', options: personnel.map(person => ({ value: person.id, label: person.name })) },
+        ...([{ key: 'protocol', label: 'Protocol', items: protocols }, { key: 'product', label: 'Product', items: products }, { key: 'batch', label: 'Batch', items: batches }, { key: 'test', label: 'Test', items: tests }] as const).map(item => ({ ...item, options: item.items.map(value => ({ value, label: value })) }))
+      ] as { key: keyof Filters; label: string; options: { value: string; label: string }[] }[]).map(item => <MultiSelectFilter key={item.key} label={item.label} options={item.options} values={filters[item.key]} onChange={values => setFilters({ ...filters, [item.key]: values })} />)}
     </div>
   );
 }
@@ -595,6 +584,7 @@ function CreateSchedule({ products, protocols, personnel, schedules, resources, 
                   setConfigs({ ...configs, [testName]: nextConfig });
                 }}><option value={1}>1 Day</option><option value={2}>2 Days</option><option value={3}>3 Days</option></select> : <input type="datetime-local" required={config.include} value={config.end_time} onChange={event => setConfigs({ ...configs, [testName]: { ...config, end_time: event.target.value } })} />}
               </>}
+              <AssignmentExplanation personnel={personnel} schedules={schedules} assayName={testName} startDate={config.start_time} durationDays={durationForConfig(config)} selectedId={config.assignee_id} />
             </div>
           ))}
         </div>

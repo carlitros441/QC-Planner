@@ -1110,3 +1110,17 @@ progress {
     flex-direction: column;
   }
 }
+.multiFilter { position: relative; min-width: 0; display: grid; gap: 6px; font-size: 12px; font-weight: 600; color: #566776; }
+.multiFilter > button { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; width: 100%; min-height: 36px; padding: 8px 10px; background: white; color: #24333a; border: 1px solid #ccd5dd; border-radius: 4px; text-align: left; }
+.multiFilter > button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.multiFilter > button svg { flex-shrink: 0; }
+.multiFilterMenu { position: absolute; z-index: 30; top: 100%; left: 0; width: 100%; min-width: min(250px, 80vw); max-height: 320px; overflow-y: auto; background: white; border: 1px solid #ccd5dd; border-radius: 4px; box-shadow: 0 6px 18px #0002; padding: 8px; }
+.multiFilter:last-child .multiFilterMenu { left: auto; right: 0; }
+.multiFilterMenu label { display: flex; align-items: flex-start; gap: 8px; padding: 8px 4px; color: #24333a; overflow-wrap: anywhere; cursor: pointer; }
+.multiFilterMenu label:hover { background: #f0f3f5; }
+.multiFilterMenu input[type=checkbox] { width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
+.assignmentExplanation { grid-column: 1 / -1; min-width: 0; border-top: 1px solid #d7dfe5; padding-top: 8px; font-size: 13px; color: #354650; overflow-wrap: anywhere; }
+.assignmentExplanation p { margin: 4px 0 8px; }
+.assignmentExplanation summary { cursor: pointer; color: #8f1230; font-weight: 600; }
+.assignmentExplanation li { margin: 7px 0; }
+.assignmentExplanation h4 { font-size: 13px; margin-bottom: 4px; }

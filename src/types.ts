@@ -203,12 +203,12 @@ export interface AdminSetting extends BaseDoc {
 }
 
 export interface Filters {
-  status: string;
-  assignee: string;
-  protocol: string;
-  product: string;
-  batch: string;
-  test: string;
+  status: string[];
+  assignee: string[];
+  protocol: string[];
+  product: string[];
+  batch: string[];
+  test: string[];
 }
 
 export type StabilityProgramStatus = 'Draft' | 'Scheduled' | 'Completed';
