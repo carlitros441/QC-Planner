@@ -31,6 +31,7 @@ import { ColumnSettings, reorderColumn, scheduleColumns, ScheduleColumnHeader, u
 import { filterSchedules } from './scheduleFilters';
 import LabResources, { AssayResourcesModal, normalizeRequirements, ResourceRequirementEditor } from './LabResources';
 import { AssignmentExplanation, PersonnelQualificationEditor, qualifiedAnalystsForAssay, rollingAssigneeForAssay, trainingAnalystsForAssay } from './PersonnelQualifications';
+import { analystLevel, assayDurationDays, canCompleteReview, eligibleReviewers, rankedReviewersForAssay, ReviewerExplanation } from './PersonnelQualifications';
 import Stability from './Stability';
 import type { AccessLevel, AccessProfile, AdminSetting, AssayResourceRequirement, AssayResourceUsage, AuditEntry, EmTest, Filters, LabResource, Personnel, Product, Protocol, ProtocolType, Role, Schedule, StabilityProgram, StabilityProtocol, Status, WorkflowStep } from './types';
 
@@ -52,6 +53,7 @@ const defaultSettings: AdminSetting = {
 const currentUserInfo = (user: User | null) => user?.email || user?.uid || 'unknown';
 const workflowErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unable to update this assay. Please try again.';
 const normalizeEmail = (email?: string | null) => String(email || '').split(/[;,]/)[0].trim().toLowerCase();
+const userCanReview = (personnel: Personnel[], user: User | null, schedule: Schedule) => canCompleteReview(personnel.find(person => person.id === schedule.reviewer_id && normalizeEmail(person.email) === normalizeEmail(user?.email)), schedule);
 const accessLevelForRole = (role?: Role): AccessLevel => {
   if (role === 'Admin') return 'Admin';
   if (role === 'Supervisor' || role === 'Manager') return 'Supervisor';
@@ -357,7 +359,7 @@ function Dashboard({ schedules, personnel, settings, refreshSchedules, user, can
   const WorkflowButtons = ({ schedule }: { schedule: Schedule }) => (
     <>
       {canExecuteWorkflow && ['Scheduled', 'In Progress'].includes(schedule.status) && <button onClick={() => completeDashboardWorkflow(schedule, false)}>Test Complete</button>}
-      {canExecuteWorkflow && schedule.status === 'Pending Review' && <button onClick={() => completeDashboardWorkflow(schedule, true)}>Review Complete</button>}
+      {canExecuteWorkflow && userCanReview(personnel, user, schedule) && schedule.status === 'Pending Review' && <button onClick={() => completeDashboardWorkflow(schedule, true)}>Review Complete</button>}
     </>
   );
   const analystSchedules = analystDetail ? activeSchedules.filter(item => item.assignee_id === analystDetail.id || item.trainee_id === analystDetail.id || item.trainee_2_id === analystDetail.id) : [];
@@ -431,8 +433,21 @@ function CreateSchedule({ products, protocols, personnel, schedules, resources, 
   const options = protocols.filter(protocol => protocol.product_id === form.product_id || protocol.product_name === selectedProduct?.name);
   const selectedProtocol = options.find(protocol => protocol.name === form.protocol_name);
   const isEm = selectedProtocol?.protocol_type === 'EM Protocol';
-  const activePersonnel = personnel.filter(person => person.active !== false);
-  const durationForConfig = (config: ScheduleTestConfig) => config.is_all_day ? Math.max(1, Number(config.duration_days || 1)) : 1;
+  const durationForConfig = (config: ScheduleTestConfig) => assayDurationDays(config);
+  const reviewerCandidates = (test: string, config: ScheduleTestConfig) => rankedReviewersForAssay(personnel, schedules, test, config.start_time, durationForConfig(config), [config.assignee_id, config.trainee_id, config.trainee_2_id]);
+  useEffect(() => {
+    setConfigs(current => {
+      let changed = false;
+      const next = Object.fromEntries(Object.entries(current).map(([test, config]) => {
+        const candidates = reviewerCandidates(test, config);
+        const reviewerId = candidates.some(item => item.person.id === config.reviewer_id) ? config.reviewer_id : candidates[0]?.person.id || '';
+        if (reviewerId === config.reviewer_id) return [test, config];
+        changed = true;
+        return [test, { ...config, reviewer_id: reviewerId }];
+      }));
+      return changed ? next : current;
+    });
+  }, [configs, personnel, schedules]);
   const qualifiedCandidates = (testName: string, config: ScheduleTestConfig) => qualifiedAnalystsForAssay(personnel, testName, config.start_time, durationForConfig(config));
   const traineeCandidates = (testName: string, config: ScheduleTestConfig) => trainingAnalystsForAssay(personnel, testName, config.start_time, durationForConfig(config));
   const preferredAssignee = (testName: string, config: ScheduleTestConfig, keepCurrent = true) => {
@@ -511,6 +526,7 @@ function CreateSchedule({ products, protocols, personnel, schedules, resources, 
     for (const [test, config] of included) {
       if (!config.assignee_id || !config.reviewer_id || !config.start_time || (!config.is_all_day && !config.end_time)) return setMessage(`Complete main analyst, reviewer, and date fields for ${test}.`);
       if (!qualifiedCandidates(test, config).some(person => person.id === config.assignee_id)) return setMessage(`Main analyst is not qualified or is unavailable for ${test}.`);
+      if (!reviewerCandidates(test, config).some(item => item.person.id === config.reviewer_id)) return setMessage(`Select a qualified Level 2-4 or Supervisor reviewer with no PTO conflict for ${test}.`);
       if (config.trainee_id && !traineeCandidates(test, config).some(person => person.id === config.trainee_id)) return setMessage(`Trainee analyst 1 is not in training or is unavailable for ${test}.`);
       if (config.trainee_2_id && !traineeCandidates(test, config).some(person => person.id === config.trainee_2_id)) return setMessage(`Trainee analyst 2 is not in training or is unavailable for ${test}.`);
       if (config.trainee_id && config.trainee_id === config.assignee_id) return setMessage(`Trainee analyst must be different from main analyst for ${test}.`);
@@ -581,7 +597,8 @@ function CreateSchedule({ products, protocols, personnel, schedules, resources, 
               <button className="autoAssignButton" type="button" disabled={!config.include || !qualifiedCandidates(testName, config).length} title="Select the qualified analyst least recently assigned to this assay" onClick={() => autoAssignTest(testName, config)}><RotateCw size={16} />Auto Assign</button>
               <select disabled={!config.include} value={config.trainee_id} onChange={event => setConfigs({ ...configs, [testName]: { ...config, trainee_id: event.target.value, trainee_2_id: config.trainee_2_id === event.target.value ? '' : config.trainee_2_id, reviewer_id: config.reviewer_id === event.target.value ? '' : config.reviewer_id } })}><option value="">Trainee Analyst 1</option>{traineeCandidates(testName, config).filter(person => person.id !== config.trainee_2_id && person.id !== config.reviewer_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
               <select disabled={!config.include} value={config.trainee_2_id} onChange={event => setConfigs({ ...configs, [testName]: { ...config, trainee_2_id: event.target.value, trainee_id: config.trainee_id === event.target.value ? '' : config.trainee_id, reviewer_id: config.reviewer_id === event.target.value ? '' : config.reviewer_id } })}><option value="">Trainee Analyst 2</option>{traineeCandidates(testName, config).filter(person => person.id !== config.trainee_id && person.id !== config.reviewer_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
-              <select disabled={!config.include} required={config.include} value={config.reviewer_id} onChange={event => setConfigs({ ...configs, [testName]: { ...config, reviewer_id: event.target.value, trainee_id: config.trainee_id === event.target.value ? '' : config.trainee_id, trainee_2_id: config.trainee_2_id === event.target.value ? '' : config.trainee_2_id } })}><option value="">QC Reviewer</option>{activePersonnel.filter(person => person.id !== config.assignee_id && person.id !== config.trainee_id && person.id !== config.trainee_2_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
+              <select aria-label={`${testName} QC Reviewer`} disabled={!config.include} required={config.include} value={config.reviewer_id} onChange={event => setConfigs({ ...configs, [testName]: { ...config, reviewer_id: event.target.value } })}><option value="">No eligible QC reviewer</option>{reviewerCandidates(testName, config).map(({ person }) => <option key={person.id} value={person.id}>{person.name} ({analystLevel(person) === 'Supervisor' ? 'Supervisor' : `Level ${analystLevel(person)}`})</option>)}</select>
+              <button className="autoAssignButton" type="button" disabled={!config.include || !reviewerCandidates(testName, config).length} onClick={() => setConfigs(current => ({ ...current, [testName]: { ...config, reviewer_id: reviewerCandidates(testName, config)[0]?.person.id || '' } }))}><RotateCw size={16} />Auto Assign Reviewer</button>
               <input disabled value={config.qc_sample_id || 'No QC Sample ID'} aria-label={`${testName} QC Sample ID`} />
               <select disabled={!config.include} value={config.workflow_step} onChange={event => setConfigs({ ...configs, [testName]: { ...config, workflow_step: event.target.value } })}><option value="">Workflow step</option>{selectedProtocol?.workflow_steps?.map(step => <option key={step.id}>{step.name}</option>)}</select>
               {isEm ? <>
@@ -609,6 +626,7 @@ function CreateSchedule({ products, protocols, personnel, schedules, resources, 
                 }}><option value={1}>1 Day</option><option value={2}>2 Days</option><option value={3}>3 Days</option></select> : <input type="datetime-local" required={config.include} value={config.end_time} onChange={event => setConfigs({ ...configs, [testName]: { ...config, end_time: event.target.value } })} />}
               </>}
               <AssignmentExplanation personnel={personnel} schedules={schedules} assayName={testName} startDate={config.start_time} durationDays={durationForConfig(config)} selectedId={config.assignee_id} />
+              <ReviewerExplanation personnel={personnel} schedules={schedules} assayName={testName} startDate={config.start_time} durationDays={durationForConfig(config)} selectedId={config.reviewer_id} excludedIds={[config.assignee_id, config.trainee_id, config.trainee_2_id]} />
             </div>
           ))}
         </div>
@@ -711,7 +729,7 @@ function Schedules({ schedules, personnel, refreshSchedules, user, canManageSche
                 progress: <ProgressBar schedule={schedule} />,
                 status: <StatusBadge status={schedule.status} />,
                 email_status: <EmailBadge status={schedule.email_status} />,
-                actions: <>{canManageSchedules && <button onClick={() => setEdit(schedule)}>Edit</button>}<button onClick={() => onOpenResources(schedule)}>Resources</button>{canExecuteWorkflow && ['Scheduled', 'In Progress'].includes(schedule.status) && <button onClick={() => completeTest(schedule)}>Test Complete</button>}{canExecuteWorkflow && schedule.status === 'Pending Review' && <button onClick={() => completeReview(schedule)}>Review Complete</button>}{canManageSchedules && <button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button>}{canSendInvites && <button onClick={() => sendUpdatedInvite(schedule)}>Send Updated Invite</button>}<button onClick={() => setAudit(schedule)}>Audit</button></>
+                actions: <>{canManageSchedules && <button onClick={() => setEdit(schedule)}>Edit</button>}<button onClick={() => onOpenResources(schedule)}>Resources</button>{canExecuteWorkflow && ['Scheduled', 'In Progress'].includes(schedule.status) && <button onClick={() => completeTest(schedule)}>Test Complete</button>}{canExecuteWorkflow && userCanReview(personnel, user, schedule) && schedule.status === 'Pending Review' && <button onClick={() => completeReview(schedule)}>Review Complete</button>}{canManageSchedules && <button onClick={() => setStatus(schedule, 'Deleted')}>Delete</button>}{canSendInvites && <button onClick={() => sendUpdatedInvite(schedule)}>Send Updated Invite</button>}<button onClick={() => setAudit(schedule)}>Audit</button></>
               };
               return <tr key={schedule.id}>{visibleColumns.map(field => <td key={field} className={field === 'actions' ? 'actions' : undefined}>{cells[field]}</td>)}</tr>;
             })}
@@ -726,10 +744,11 @@ function Schedules({ schedules, personnel, refreshSchedules, user, canManageSche
 }
 
 function ScheduleEditor({ schedule, personnel, setSchedule, onSave }: { schedule: Schedule; personnel: Personnel[]; setSchedule: (schedule: Schedule) => void; onSave: (schedule: Schedule) => void }) {
-  const activePersonnel = personnel.filter(person => person.active !== false);
+  const reviewers = eligibleReviewers(personnel, schedule.test_name, schedule.start_time, assayDurationDays(schedule), [schedule.assignee_id, schedule.trainee_id, schedule.trainee_2_id]);
   const qualifiedPersonnel = qualifiedAnalystsForAssay(personnel, schedule.test_name, schedule.start_time, schedule.duration_days || 1);
   const trainingPersonnel = trainingAnalystsForAssay(personnel, schedule.test_name, schedule.start_time, schedule.duration_days || 1);
   const assignmentValid = qualifiedPersonnel.some(person => person.id === schedule.assignee_id)
+    && reviewers.some(person => person.id === schedule.reviewer_id)
     && (!schedule.trainee_id || trainingPersonnel.some(person => person.id === schedule.trainee_id))
     && (!schedule.trainee_2_id || trainingPersonnel.some(person => person.id === schedule.trainee_2_id));
   const setHarvestDay = (harvestDay: string) => {
@@ -745,13 +764,13 @@ function ScheduleEditor({ schedule, personnel, setSchedule, onSave }: { schedule
       <label>Main Analyst<select value={schedule.assignee_id} onChange={event => setSchedule({ ...schedule, assignee_id: event.target.value, trainee_id: schedule.trainee_id === event.target.value ? '' : schedule.trainee_id, trainee_2_id: schedule.trainee_2_id === event.target.value ? '' : schedule.trainee_2_id, reviewer_id: schedule.reviewer_id === event.target.value ? '' : schedule.reviewer_id })}><option value="">No qualified analyst available</option>{qualifiedPersonnel.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
       <label>Trainee Analyst 1<select value={schedule.trainee_id || ''} onChange={event => setSchedule({ ...schedule, trainee_id: event.target.value, trainee_2_id: schedule.trainee_2_id === event.target.value ? '' : schedule.trainee_2_id, reviewer_id: schedule.reviewer_id === event.target.value ? '' : schedule.reviewer_id })}><option value="">No trainee</option>{trainingPersonnel.filter(person => person.id !== schedule.trainee_2_id && person.id !== schedule.reviewer_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
       <label>Trainee Analyst 2<select value={schedule.trainee_2_id || ''} onChange={event => setSchedule({ ...schedule, trainee_2_id: event.target.value, trainee_id: schedule.trainee_id === event.target.value ? '' : schedule.trainee_id, reviewer_id: schedule.reviewer_id === event.target.value ? '' : schedule.reviewer_id })}><option value="">No second trainee</option>{trainingPersonnel.filter(person => person.id !== schedule.trainee_id && person.id !== schedule.reviewer_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
-      <label>QC Reviewer<select value={schedule.reviewer_id || ''} onChange={event => setSchedule({ ...schedule, reviewer_id: event.target.value, trainee_id: schedule.trainee_id === event.target.value ? '' : schedule.trainee_id, trainee_2_id: schedule.trainee_2_id === event.target.value ? '' : schedule.trainee_2_id })}><option value="">Select reviewer</option>{activePersonnel.filter(person => person.id !== schedule.assignee_id && person.id !== schedule.trainee_id && person.id !== schedule.trainee_2_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+      <label>QC Reviewer<select value={schedule.reviewer_id || ''} onChange={event => setSchedule({ ...schedule, reviewer_id: event.target.value })}><option value="">Select eligible reviewer</option>{reviewers.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
       <label>QC Sample ID<input value={schedule.qc_sample_id || 'Not set'} readOnly disabled /></label>
       <label>Harvest Day<input type="date" value={formatDate(schedule.harvest_day_zero)} onChange={event => setHarvestDay(event.target.value)} /></label>
       <label>Start<input type={schedule.is_all_day ? 'date' : 'datetime-local'} value={schedule.start_time} onChange={event => setSchedule({ ...schedule, start_time: event.target.value })} /></label>
       <label>Duration Days<input type="number" min={1} step={1} value={schedule.duration_days || 1} onChange={event => setSchedule({ ...schedule, duration_days: Math.max(1, Number(event.target.value || 1)) })} /></label>
       <label>Execution Progress<input type="number" min={0} max={80} value={Math.min(schedule.progress || 0, 80)} onChange={event => setSchedule({ ...schedule, progress: Number(event.target.value) })} /></label>
-      {!assignmentValid && <div className="errorBox wide">Select a qualified, available main analyst. Trainees must have an active In Training qualification and be available for the assay dates.</div>}
+      {!assignmentValid && <div className="errorBox wide">Select a qualified, available main analyst and a qualified Level 2-4 or Supervisor reviewer. Trainees must be in training. All assignments must be available for the assay dates.</div>}
       <button className="primaryButton wide" disabled={!assignmentValid} onClick={() => onSave(schedule)}>Save Schedule</button>
     </div>
   );
@@ -903,7 +922,7 @@ function CalendarView({ schedules, personnel, refreshSchedules, user, canManageS
             {canSendInvites && <button className="primaryButton" onClick={resendInvite}>Send Updated Invite</button>}
             {canManageSchedules && <button className="primaryButton" onClick={saveProgress}>Save Progress</button>}
             {canExecuteWorkflow && selected.status !== 'Completed' && selected.status !== 'Pending Review' && <button className="primaryButton" onClick={markComplete}>Test Complete</button>}
-            {canExecuteWorkflow && selected.status === 'Pending Review' && <button className="primaryButton" onClick={markReviewComplete}>Review Complete</button>}
+            {canExecuteWorkflow && userCanReview(personnel, user, selected) && selected.status === 'Pending Review' && <button className="primaryButton" onClick={markReviewComplete}>Review Complete</button>}
           </div>
         </div>
       </Modal>}
@@ -1050,7 +1069,7 @@ function PersonnelPage({ personnel, protocols, stabilityProtocols, refreshPerson
         setMessage(`Email ${cleanEmail} is already assigned to ${duplicate.name}. Each login email must belong to one Personnel profile.`);
         return;
       }
-      const payload = { ...edit, email: deliveryEmail, assay_qualifications: qualifications.map(item => ({ ...item, training_records: item.training_records || [] })), time_off: edit.time_off || [] };
+      const payload = { ...edit, email: deliveryEmail, review_qualified_assays: qualifications.filter(item => item.status === 'Qualified').map(item => item.assay_name.trim().toLowerCase()), assay_qualifications: qualifications.map(item => ({ ...item, training_records: item.training_records || [] })), time_off: edit.time_off || [] };
       const personnelId = await saveDoc('personnel', payload, edit.id);
       const savedPerson = { ...payload, id: personnelId } as Personnel;
       await saveDoc('accessProfiles', accessProfilePayload(savedPerson), cleanEmail);
@@ -1078,13 +1097,14 @@ function PersonnelPage({ personnel, protocols, stabilityProtocols, refreshPerson
         const qualified = (person.assay_qualifications || []).filter(item => item.status === 'Qualified').length;
         const training = (person.assay_qualifications || []).filter(item => item.status === 'In Training').length;
         const upcomingTimeOff = (person.time_off || []).filter(period => period.end_date >= todayDate).length;
-        return <tr key={person.id}><td>{person.name}<small>{person.initials || initials(person.name)}</small></td><td>{person.email}</td><td>{person.role}<small>{accessLevelForRole(person.role)}</small></td><td>{qualified} qualified<small>{training} in training</small></td><td>{upcomingTimeOff || 'None'}</td><td>{person.active ? 'Active' : 'Inactive'}</td><td><button onClick={() => { setMessage(''); setEdit({ ...person, assay_qualifications: person.assay_qualifications || [], time_off: person.time_off || [] }); }}>Edit</button><button onClick={() => removePerson(person)}>Delete</button></td></tr>;
+        return <tr key={person.id}><td>{person.name}<small>{person.initials || initials(person.name)}</small></td><td>{person.email}</td><td>{person.role}<small>{analystLevel(person) ? `Analyst level: ${analystLevel(person)}` : 'Level not classified'}</small></td><td>{qualified} qualified<small>{training} in training</small></td><td>{upcomingTimeOff || 'None'}</td><td>{person.active ? 'Active' : 'Inactive'}</td><td><button onClick={() => { setMessage(''); setEdit({ ...person, assay_qualifications: person.assay_qualifications || [], time_off: person.time_off || [] }); }}>Edit</button><button onClick={() => removePerson(person)}>Delete</button></td></tr>;
       })}</tbody></table></div>
       {edit && <Modal title="Analyst Profile" onClose={() => setEdit(null)}><div className="formGrid">
         <label>Name<input value={edit.name || ''} onChange={event => setEdit({ ...edit, name: event.target.value })} /></label>
         <label>Email<input type="email" value={edit.email || ''} onChange={event => setEdit({ ...edit, email: event.target.value })} /></label>
         <label>Role<select value={edit.role || 'Analyst'} onChange={event => setEdit({ ...edit, role: event.target.value as Personnel['role'] })}><option>Admin</option><option>Manager</option><option>Supervisor</option><option>QA</option><option>Analyst</option></select></label>
         <label>Access Level<input value={accessLevelForRole(edit.role)} disabled readOnly /></label>
+        <label>Analyst Level<select value={analystLevel(edit) || ''} disabled={edit.role === 'Supervisor'} onChange={event => setEdit({ ...edit, analyst_level: event.target.value as Personnel['analyst_level'] })}><option value="">Not classified</option><option value="1">Analyst Level 1</option><option value="2">Analyst Level 2</option><option value="3">Analyst Level 3</option><option value="4">Analyst Level 4</option><option value="Supervisor">Supervisor</option></select></label>
         <label>Initials<input value={edit.initials || ''} onChange={event => setEdit({ ...edit, initials: event.target.value.toUpperCase() })} /></label>
         <label className="checkLine"><input type="checkbox" checked={edit.active !== false} onChange={event => setEdit({ ...edit, active: event.target.checked })} />Active</label>
         <PersonnelQualificationEditor person={edit} personnel={personnel} assayNames={assayNames} currentUser={currentUserInfo(user)} onChange={setEdit} />

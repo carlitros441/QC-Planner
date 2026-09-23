@@ -88,6 +88,8 @@ export interface PersonnelTimeOff {
 }
 
 export interface Personnel extends BaseDoc {
+  analyst_level?: '1' | '2' | '3' | '4' | 'Supervisor';
+  review_qualified_assays?: string[];
   name: string;
   email: string;
   role: Role;

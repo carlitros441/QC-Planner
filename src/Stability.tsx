@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { eligibleReviewers, rankedReviewersForAssay, ReviewerExplanation } from './PersonnelQualifications';
 import type { ReactNode } from 'react';
 import type { User } from 'firebase/auth';
 import { addAuditEntry, addDays, formatDate, removeDoc, saveDoc } from './data';
@@ -169,6 +170,7 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
 }
 
 function ProgramEditor({
+  schedules,
   program,
   protocols,
   products,
@@ -178,6 +180,7 @@ function ProgramEditor({
   onSave,
   onPush
 }: {
+  schedules: Schedule[];
   program: Draft<StabilityProgram>;
   protocols: StabilityProtocol[];
   products: Product[];
@@ -190,6 +193,21 @@ function ProgramEditor({
   const selectedProtocol = protocols.find(protocol => protocol.id === program.protocol_id);
   const people = activePersonnel(personnel);
   const assignments = program.assignments || [];
+  const reviewCandidates = (assignment: StabilityAssignment) => rankedReviewersForAssay(personnel, schedules, assignment.test_name, assignment.start_time, assignment.duration_days || 1, [assignment.assignee_id, assignment.trainee_id, assignment.trainee_2_id]);
+  useEffect(() => {
+    let changed = false;
+    const reviewHistory = [...schedules];
+    const next = assignments.map(assignment => {
+      if (assignment.generated_schedule_id) return assignment;
+      const candidates = rankedReviewersForAssay(personnel, reviewHistory, assignment.test_name, assignment.start_time, assignment.duration_days || 1, [assignment.assignee_id, assignment.trainee_id, assignment.trainee_2_id]);
+      const reviewerId = candidates.some(item => item.person.id === assignment.reviewer_id) ? assignment.reviewer_id : candidates[0]?.person.id || '';
+      if (assignment.include && reviewerId) reviewHistory.push({ ...assignment, reviewer_id: reviewerId, status: 'Scheduled' } as unknown as Schedule);
+      if (reviewerId === assignment.reviewer_id) return assignment;
+      changed = true;
+      return { ...assignment, reviewer_id: reviewerId };
+    });
+    if (changed) setProgram({ ...program, assignments: next });
+  }, [program, personnel, schedules]);
   const setAssignment = (id: string, patch: Partial<StabilityAssignment>) => {
     setProgram({
       ...program,
@@ -279,7 +297,8 @@ function ProgramEditor({
             <label>Main Analyst<select disabled={!assignment.include} required={assignment.include} value={assignment.assignee_id} onChange={event => setAssignment(assignment.id, { assignee_id: event.target.value, trainee_id: assignment.trainee_id === event.target.value ? '' : assignment.trainee_id, trainee_2_id: assignment.trainee_2_id === event.target.value ? '' : assignment.trainee_2_id, reviewer_id: assignment.reviewer_id === event.target.value ? '' : assignment.reviewer_id })}><option value="">Select analyst</option>{people.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
             <label>Trainee 1<select disabled={!assignment.include} value={assignment.trainee_id || ''} onChange={event => setAssignment(assignment.id, { trainee_id: event.target.value, trainee_2_id: assignment.trainee_2_id === event.target.value ? '' : assignment.trainee_2_id, reviewer_id: assignment.reviewer_id === event.target.value ? '' : assignment.reviewer_id })}><option value="">No trainee</option>{people.filter(person => person.id !== assignment.assignee_id && person.id !== assignment.trainee_2_id && person.id !== assignment.reviewer_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
             <label>Trainee 2<select disabled={!assignment.include} value={assignment.trainee_2_id || ''} onChange={event => setAssignment(assignment.id, { trainee_2_id: event.target.value, trainee_id: assignment.trainee_id === event.target.value ? '' : assignment.trainee_id, reviewer_id: assignment.reviewer_id === event.target.value ? '' : assignment.reviewer_id })}><option value="">No second trainee</option>{people.filter(person => person.id !== assignment.assignee_id && person.id !== assignment.trainee_id && person.id !== assignment.reviewer_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
-            <label>QC Reviewer<select disabled={!assignment.include} required={assignment.include} value={assignment.reviewer_id} onChange={event => setAssignment(assignment.id, { reviewer_id: event.target.value, trainee_id: assignment.trainee_id === event.target.value ? '' : assignment.trainee_id, trainee_2_id: assignment.trainee_2_id === event.target.value ? '' : assignment.trainee_2_id })}><option value="">Select reviewer</option>{people.filter(person => person.id !== assignment.assignee_id && person.id !== assignment.trainee_id && person.id !== assignment.trainee_2_id).map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+            <label>QC Reviewer<select disabled={!assignment.include} required={assignment.include} value={assignment.reviewer_id} onChange={event => setAssignment(assignment.id, { reviewer_id: event.target.value })}><option value="">No eligible reviewer</option>{reviewCandidates(assignment).map(({ person }) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+            <ReviewerExplanation personnel={personnel} schedules={schedules} assayName={assignment.test_name} startDate={assignment.start_time} durationDays={assignment.duration_days || 1} selectedId={assignment.reviewer_id} excludedIds={[assignment.assignee_id, assignment.trainee_id, assignment.trainee_2_id]} />
             <label>Scheduled Date<input disabled={!assignment.include} required={assignment.include} min={assignment.window_start} max={assignment.window_end} type="date" value={formatDate(assignment.start_time)} onChange={event => setAssignment(assignment.id, { start_time: event.target.value })} /></label>
             <label>Duration<input type="number" min={1} value={assignment.duration_days || 1} onChange={event => setAssignment(assignment.id, { duration_days: Number(event.target.value || 1) })} /></label>
             <button type="button" onClick={() => removeAssignment(assignment.id)}>Remove</button>
@@ -460,6 +479,7 @@ export default function Stability({
     for (const assignment of (program.assignments || []).filter(item => item.include)) {
       if (!assignment.test_name) return 'Each included row needs a test name.';
       if (!assignment.assignee_id || !assignment.reviewer_id || !assignment.start_time) return `Complete analyst, reviewer, and schedule date for ${assignment.test_name}.`;
+      if (!assignment.generated_schedule_id && !eligibleReviewers(personnel, assignment.test_name, assignment.start_time, assignment.duration_days || 1, [assignment.assignee_id, assignment.trainee_id, assignment.trainee_2_id]).some(person => person.id === assignment.reviewer_id)) return `Select a qualified, available Level 2-4 or Supervisor reviewer for ${assignment.test_name}.`;
       if (assignment.assignee_id === assignment.reviewer_id) return `Reviewer must be different from main analyst for ${assignment.test_name}.`;
       if (assignment.trainee_id && assignment.trainee_id === assignment.assignee_id) return `Trainee must be different from main analyst for ${assignment.test_name}.`;
       if (assignment.trainee_id && assignment.trainee_id === assignment.reviewer_id) return `Trainee must be different from reviewer for ${assignment.test_name}.`;
@@ -605,7 +625,7 @@ export default function Stability({
         </table>
       </div>
       {canManage && protocolEdit && <Modal title="Stability Protocol" onClose={() => setProtocolEdit(null)}><ProtocolEditor protocol={protocolEdit} resources={resources} setProtocol={setProtocolEdit} onSave={saveProtocol} /></Modal>}
-      {canManage && programEdit && <Modal title="Stability Program Draft" onClose={() => setProgramEdit(null)}><ProgramEditor program={programEdit} products={products} protocols={protocols} personnel={personnel} resources={resources} setProgram={setProgramEdit} onSave={saveProgram} onPush={pushProgram} /></Modal>}
+      {canManage && programEdit && <Modal title="Stability Program Draft" onClose={() => setProgramEdit(null)}><ProgramEditor schedules={schedules} program={programEdit} products={products} protocols={protocols} personnel={personnel} resources={resources} setProgram={setProgramEdit} onSave={saveProgram} onPush={pushProgram} /></Modal>}
       {detail && <Modal title={`${detail.batch_number} Stability Details`} onClose={() => setDetail(null)}><div className="detailList">{(detail.assignments || []).filter(assignment => assignment.include).map(assignment => <div className="recordRow" key={assignment.id}><div><strong>{assignment.time_point_label} / {assignment.test_name}</strong><span>Target {formatDate(assignment.target_date)} / Window {formatDate(assignment.window_start)} to {formatDate(assignment.window_end)}</span><small>Main {getPersonName(assignment.assignee_id)} / Reviewer {getPersonName(assignment.reviewer_id)}</small></div><div>{assignment.generated_schedule_id ? <StabilityBadge status={schedulesById.get(assignment.generated_schedule_id)?.status || 'Scheduled'} /> : <StabilityBadge status="Draft" />}</div></div>)}</div></Modal>}
     </section>
   );

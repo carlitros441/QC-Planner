@@ -39,15 +39,16 @@ export const trainingAnalystsForAssay = (personnel: Personnel[], assayName: stri
     && isAvailableForAssayDates(person, startDate, durationDays))
 );
 
-export const rankedAnalystsForAssay = (personnel: Personnel[], schedules: Schedule[], assayName: string, startDate?: string, durationDays = 1) => {
+export const rankedAnalystsForAssay = (personnel: Personnel[], schedules: Schedule[], assayName: string, startDate?: string, durationDays = 1, assignmentField: 'assignee_id' | 'reviewer_id' = 'assignee_id') => {
   const candidates = qualifiedAnalystsForAssay(personnel, assayName, startDate, durationDays);
   const assayKey = normalizeAssayName(assayName);
   const lastAssignment = new Map<string, string>();
   schedules.forEach(schedule => {
     if (schedule.status === 'Deleted' || normalizeAssayName(schedule.test_name) !== assayKey) return;
     const scheduledAt = String(schedule.start_time || '');
-    if (!scheduledAt || scheduledAt <= String(lastAssignment.get(schedule.assignee_id) || '')) return;
-    lastAssignment.set(schedule.assignee_id, scheduledAt);
+    const personId = schedule[assignmentField];
+    if (!personId || !scheduledAt || scheduledAt <= String(lastAssignment.get(personId) || '')) return;
+    lastAssignment.set(personId, scheduledAt);
   });
   return [...candidates]
     .sort((left, right) => {
@@ -59,6 +60,39 @@ export const rankedAnalystsForAssay = (personnel: Personnel[], schedules: Schedu
 export const rollingAssigneeForAssay = (personnel: Personnel[], schedules: Schedule[], assayName: string, startDate?: string, durationDays = 1) => (
   rankedAnalystsForAssay(personnel, schedules, assayName, startDate, durationDays)[0]?.person.id || ''
 );
+
+export const analystLevel = (person: Partial<Personnel>) => person.role === 'Supervisor' ? 'Supervisor' : person.analyst_level;
+export const hasReviewerLevel = (person: Personnel) => ['2', '3', '4', 'Supervisor'].includes(analystLevel(person) || '');
+export const assayDurationDays = (assay: { is_all_day?: boolean; start_time?: string; end_time?: string; duration_days?: number | null }) => {
+  if (assay.is_all_day !== false) return Math.max(1, Number(assay.duration_days || 1));
+  const start = Date.parse(`${dateOnly(assay.start_time)}T00:00:00Z`);
+  const end = Date.parse(`${dateOnly(assay.end_time)}T00:00:00Z`);
+  return Number.isFinite(start) && Number.isFinite(end) ? Math.max(1, Math.round((end - start) / 86400000) + 1) : 1;
+};
+export const eligibleReviewers = (personnel: Personnel[], assayName: string, startDate?: string, durationDays = 1, excludedIds: (string | undefined)[] = []) => (
+  qualifiedAnalystsForAssay(personnel, assayName, startDate, durationDays).filter(person => hasReviewerLevel(person) && !excludedIds.includes(person.id))
+);
+export const rankedReviewersForAssay = (personnel: Personnel[], schedules: Schedule[], assayName: string, startDate?: string, durationDays = 1, excludedIds: (string | undefined)[] = []) => (
+  rankedAnalystsForAssay(eligibleReviewers(personnel, assayName, startDate, durationDays, excludedIds), schedules, assayName, startDate, durationDays, 'reviewer_id')
+);
+export const canCompleteReview = (person: Personnel | undefined | null, schedule: Schedule) => Boolean(person
+  && person.active !== false && hasReviewerLevel(person)
+  && person.id === schedule.reviewer_id
+  && ![schedule.assignee_id, schedule.trainee_id, schedule.trainee_2_id].includes(person.id)
+  && qualificationForAssay(person, schedule.test_name)?.status === 'Qualified');
+
+export function ReviewerExplanation({ personnel, schedules, assayName, startDate, durationDays, excludedIds, selectedId }: {
+  personnel: Personnel[]; schedules: Schedule[]; assayName: string; startDate: string; durationDays: number; excludedIds: (string | undefined)[]; selectedId: string;
+}) {
+  const ranked = rankedReviewersForAssay(personnel, schedules, assayName, startDate, durationDays, excludedIds);
+  const rank = ranked.findIndex(item => item.person.id === selectedId);
+  return <div className="assignmentExplanation"><p>{rank < 0 ? 'No eligible QC reviewer available.' : `QC reviewer: ${ranked[rank].person.name}, #${rank + 1} of ${ranked.length} in the eligible review rotation.`} {startDate ? 'PTO checked for the assay dates.' : 'Select an execution date to check reviewer PTO.'}</p>
+    <details><summary>Reviewer selection order and availability</summary>
+      <p>Level 2-4 or Supervisor; qualified for this assay. Main analyst and trainees are excluded. Oldest last scheduled review first; no prior reviews first; ties use name order.</p>
+      <ol>{ranked.map(item => <li key={item.person.id}>{item.person.name} ({analystLevel(item.person) === 'Supervisor' ? 'Supervisor' : `Level ${analystLevel(item.person)}`}) - {item.lastAssignment ? `Last review scheduled: ${dateOnly(item.lastAssignment)}` : 'No previous review assignment'} - {startDate ? 'No PTO conflict' : 'PTO not checked'}</li>)}</ol>
+      <ul>{personnel.filter(person => !ranked.some(item => item.person.id === person.id)).map(person => <li key={person.id}>{person.name}: {person.active === false ? 'Inactive' : !hasReviewerLevel(person) ? 'Requires Level 2-4 or Supervisor' : excludedIds.includes(person.id) ? 'Assigned as main analyst or trainee' : qualificationForAssay(person, assayName)?.status !== 'Qualified' ? 'Not qualified for this assay' : 'PTO overlaps assay dates'}</li>)}</ul>
+    </details></div>;
+}
 
 export function AssignmentExplanation({ personnel, schedules, assayName, startDate, durationDays, selectedId }: {
   personnel: Personnel[]; schedules: Schedule[]; assayName: string; startDate: string; durationDays: number; selectedId: string;

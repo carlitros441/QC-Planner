@@ -59,7 +59,11 @@ accessProfiles/{normalizedEmail}
 
 Firebase Authentication users are matched to active Personnel records by the first email address in the Personnel email field. Additional comma- or semicolon-separated addresses remain available for invite delivery.
 
-- `Analyst` and `QA`: view data, complete testing, complete QC review, view audit history, change password, and send updated invites.
+- `Analyst` and `QA`: view data, complete testing, view audit history, change password, and send updated invites. Only the assigned, assay-qualified Level 2-4 or Supervisor reviewer can complete a pending QC review.
+
+Personnel profiles have an analyst classification (1-4 or Supervisor) separate from application access roles. Admin and Manager access do not automatically grant reviewer eligibility. Assign and save each existing profile's level under Personnel before scheduling reviews; profiles without a level are excluded. Saving a profile also updates the qualification index used by Firestore rules. Supervisor access roles count as Supervisor classification.
+
+New QC/EM schedules and stability drafts automatically select an eligible reviewer using review assignment history (oldest most recent scheduled review first, with unassigned reviewers first and alphabetical ties). Reviewer selection excludes the main analyst, both trainees, inactive or unqualified personnel, and PTO conflicts over the assay duration. Manual selection is limited to the same eligible pool. Firestore rules enforce reviewer level, qualification, independent assignment, and review completion identity; the scheduling app checks recorded PTO.
 - `Supervisor` and `Manager`: Analyst permissions plus schedule/test editing, schedule creation, QC Stability management, and product/protocol management.
 - `Admin`: Supervisor permissions plus Personnel management and Admin Settings.
 - Missing or inactive Personnel profile: read-only Viewer access.

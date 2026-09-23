@@ -70,6 +70,37 @@ service cloud.firestore {
         );
     }
 
+    function eligibleReviewer(data) {
+      let person = get(/databases/$(database)/documents/personnel/$(data.reviewer_id)).data;
+      return person.active == true
+        && (person.get('analyst_level', '') in ['2', '3', '4', 'Supervisor'] || person.role == 'Supervisor')
+        && data.test_name.lower() in person.get('review_qualified_assays', [])
+        && data.reviewer_id != data.assignee_id
+        && data.reviewer_id != data.get('trainee_id', '')
+        && data.reviewer_id != data.get('trainee_2_id', '');
+    }
+
+    function reviewCompletionAllowed() {
+      let after = request.resource.data;
+      let before = resource.data;
+      let completed = after.status == 'Completed' || after.get('review_status', '') == 'Completed';
+      let completing = completed && (before.status != 'Completed' && before.get('review_status', '') != 'Completed');
+      let reviewRecorded = after.diff(before).affectedKeys().hasAny(['review_completed_at']);
+      return !(completing || reviewRecorded) || (
+        activeAccess()
+        && before.status == 'Pending Review'
+        && before.reviewer_id == after.reviewer_id
+        && accessProfile().personnel_id == after.reviewer_id
+        && eligibleReviewer(after)
+      );
+    }
+
+    function reviewerAssignmentAllowed() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'reviewer_id', 'assignee_id', 'trainee_id', 'trainee_2_id', 'test_name', 'start_time', 'end_time', 'is_all_day', 'duration_days'
+      ]) || eligibleReviewer(request.resource.data);
+    }
+
     function isInviteUpdate() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       return isAnalyst()
@@ -79,8 +110,11 @@ service cloud.firestore {
 
     match /schedules/{scheduleId} {
       allow read: if signedIn();
-      allow create: if isSupervisor();
-      allow update: if isSupervisor() || isCompletionUpdate() || isInviteUpdate();
+      allow create: if isSupervisor() && eligibleReviewer(request.resource.data)
+        && request.resource.data.status != 'Completed'
+        && request.resource.data.get('review_status', '') != 'Completed';
+      allow update: if (isSupervisor() || isCompletionUpdate() || isInviteUpdate())
+        && reviewCompletionAllowed() && reviewerAssignmentAllowed();
       allow delete: if false;
 
       match /auditTrail/{auditId} {

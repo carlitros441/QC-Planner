@@ -12,8 +12,9 @@ import {
   Timestamp,
   where
 } from 'firebase/firestore';
-import { db } from './firebase';
-import type { AuditEntry } from './types';
+import { auth, db } from './firebase';
+import { assayDurationDays, canCompleteReview, eligibleReviewers } from './PersonnelQualifications';
+import type { AuditEntry, AccessProfile, Personnel, Schedule } from './types';
 
 const requireDb = () => {
   if (!db) throw new Error('Firebase is not configured.');
@@ -55,6 +56,27 @@ export async function saveDoc<T extends object>(collectionName: string, payload:
   const database = requireDb();
   const cleanPayload = stripUndefined(payload) as Record<string, unknown>;
   delete cleanPayload.id;
+  if (collectionName === 'schedules') {
+    const before = id ? await getOne<Schedule>('schedules', id) : null;
+    const after = { ...before, ...cleanPayload } as unknown as Schedule;
+    const completing = (after.status === 'Completed' || after.review_status === 'Completed')
+      && before?.status !== 'Completed' && before?.review_status !== 'Completed';
+    if (completing) {
+      const email = auth?.currentUser?.email;
+      const profile = email ? await getOne<AccessProfile>('accessProfiles', email) : null;
+      const reviewer = profile?.personnel_id ? await getOne<Personnel>('personnel', profile.personnel_id) : null;
+      if (before?.status !== 'Pending Review' || !canCompleteReview(reviewer, after)) {
+        throw new Error('Only the assigned, qualified Level 2-4 or Supervisor reviewer can complete a pending review.');
+      }
+    }
+    const assignmentChanged = !before || ['reviewer_id', 'assignee_id', 'trainee_id', 'trainee_2_id', 'test_name', 'start_time', 'end_time', 'is_all_day', 'duration_days'].some(field => cleanPayload[field] !== undefined && cleanPayload[field] !== (before as unknown as Record<string, unknown>)[field]);
+    if (assignmentChanged) {
+      const reviewer = after.reviewer_id ? await getOne<Personnel>('personnel', after.reviewer_id) : null;
+      if (!reviewer || !eligibleReviewers([reviewer], after.test_name, after.start_time, assayDurationDays(after), [after.assignee_id, after.trainee_id, after.trainee_2_id]).length) {
+        throw new Error('Choose a qualified Level 2-4 or Supervisor reviewer, different from the execution team and without overlapping PTO.');
+      }
+    }
+  }
   cleanPayload.updated_at = serverTimestamp();
 
   if (id) {

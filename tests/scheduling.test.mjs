@@ -42,7 +42,7 @@ test('Moving columns in either direction preserves widths and visibility', () =>
   assert.deepEqual(reorderColumn(moved, 'actions', 'email_status').order, original.order);
   assert.equal(original.order[0], 'test_name');
 });
-const { rankedAnalystsForAssay, rollingAssigneeForAssay } = await loadSource('src/PersonnelQualifications.tsx');
+const { rankedAnalystsForAssay, rollingAssigneeForAssay, eligibleReviewers, rankedReviewersForAssay, canCompleteReview } = await loadSource('src/PersonnelQualifications.tsx');
 const filters = { status: [], assignee: [], protocol: [], product: [], batch: [], test: [] };
 const rows = [
   { id: '1', status: 'Scheduled', assignee_id: 'a', trainee_2_id: 'c', protocol_name: 'P1', product_id: 'X', batch_number: 'B1', test_name: 'T1' },
@@ -73,4 +73,26 @@ test('PTO on final execution day excludes analyst; outside window remains eligib
 test('Ties sort alphabetically and unavailable pool yields no choice', () => {
   assert.deepEqual(rankedAnalystsForAssay(people.slice(0, 3), [], 'T1').map(item => item.person.id), ['a', 'b', 'c']);
   assert.equal(rollingAssigneeForAssay(people.slice(4), [], 'T1'), '');
+});
+
+test('Review eligibility requires Level 2-4 or Supervisor and assay qualification', () => {
+  const reviewers = [person('1', 'Level One', { analyst_level: '1' }), person('2', 'Level Two', { analyst_level: '2' }), person('3', 'Level Three', { analyst_level: '3' }), person('4', 'Level Four', { analyst_level: '4' }), person('s', 'Supervisor', { role: 'Supervisor' }), person('a', 'Admin', { role: 'Admin' }), person('u', 'Unqualified', { analyst_level: '4', assay_qualifications: [] })];
+  assert.deepEqual(eligibleReviewers(reviewers, 'T1').map(p => p.id), ['2', '3', '4', 's']);
+});
+test('Review rotation uses review history, excludes execution team and PTO', () => {
+  const reviewers = [person('a', 'Alice', { analyst_level: '2' }), person('b', 'Bob', { analyst_level: '3' }), person('c', 'Cara', { analyst_level: '4' }), person('d', 'Dan', { analyst_level: '4', time_off: [{ start_date: '2026-10-03', end_date: '2026-10-05' }] })];
+  const history = [{ test_name: 'T1', reviewer_id: 'a', assignee_id: 'b', start_time: '2026-09-01' }, { test_name: 'T1', reviewer_id: 'b', assignee_id: 'a', start_time: '2026-08-01' }];
+  const ranked = rankedReviewersForAssay(reviewers, history, 'T1', '2026-10-01', 3, ['c']);
+  assert.deepEqual(ranked.map(item => item.person.id), ['b', 'a']);
+  assert.equal(ranked[0].lastAssignment, '2026-08-01');
+});
+test('Only assigned qualified senior reviewer can complete, with no self-review', () => {
+  const reviewer = person('b', 'Bob', { analyst_level: '2' });
+  const assay = { assignee_id: 'a', reviewer_id: 'b', test_name: 'T1' };
+  assert.equal(canCompleteReview(reviewer, assay), true);
+  assert.equal(canCompleteReview({ ...reviewer, analyst_level: '1' }, assay), false);
+  assert.equal(canCompleteReview({ ...reviewer, active: false }, assay), false);
+  assert.equal(canCompleteReview({ ...reviewer, id: 'c' }, assay), false);
+  assert.equal(canCompleteReview(reviewer, { ...assay, trainee_2_id: 'b' }), false);
+  assert.equal(canCompleteReview(reviewer, { ...assay, assignee_id: 'b' }), false);
 });
