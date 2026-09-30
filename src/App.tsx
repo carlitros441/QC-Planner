@@ -53,7 +53,10 @@ const defaultSettings: AdminSetting = {
 const currentUserInfo = (user: User | null) => user?.email || user?.uid || 'unknown';
 const workflowErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unable to update this assay. Please try again.';
 const normalizeEmail = (email?: string | null) => String(email || '').split(/[;,]/)[0].trim().toLowerCase();
-const userCanReview = (personnel: Personnel[], user: User | null, schedule: Schedule) => canCompleteReview(personnel.find(person => person.id === schedule.reviewer_id && normalizeEmail(person.email) === normalizeEmail(user?.email)), schedule);
+const userCanReview = (personnel: Personnel[], user: User | null, schedule: Schedule) => {
+  const matching = personnel.filter(person => person.active !== false && normalizeEmail(person.email) === normalizeEmail(user?.email));
+  return canCompleteReview(matching.find(person => person.role === 'Admin') || matching.find(person => person.id === schedule.reviewer_id), schedule);
+};
 const accessLevelForRole = (role?: Role): AccessLevel => {
   if (role === 'Admin') return 'Admin';
   if (role === 'Supervisor' || role === 'Manager') return 'Supervisor';

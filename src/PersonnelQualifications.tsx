@@ -75,11 +75,15 @@ export const eligibleReviewers = (personnel: Personnel[], assayName: string, sta
 export const rankedReviewersForAssay = (personnel: Personnel[], schedules: Schedule[], assayName: string, startDate?: string, durationDays = 1, excludedIds: (string | undefined)[] = []) => (
   rankedAnalystsForAssay(eligibleReviewers(personnel, assayName, startDate, durationDays, excludedIds), schedules, assayName, startDate, durationDays, 'reviewer_id')
 );
-export const canCompleteReview = (person: Personnel | undefined | null, schedule: Schedule) => Boolean(person
+const canCompleteAssignedReview = (person: Personnel | undefined | null, schedule: Schedule) => Boolean(person
   && person.active !== false && hasReviewerLevel(person)
   && person.id === schedule.reviewer_id
   && ![schedule.assignee_id, schedule.trainee_id, schedule.trainee_2_id].includes(person.id)
   && qualificationForAssay(person, schedule.test_name)?.status === 'Qualified');
+
+export const isAdminReviewOverride = (person: Personnel | undefined | null, schedule: Schedule) => Boolean(person
+  && person.active !== false && person.role === 'Admin' && !canCompleteAssignedReview(person, schedule));
+export const canCompleteReview = (person: Personnel | undefined | null, schedule: Schedule) => canCompleteAssignedReview(person, schedule) || isAdminReviewOverride(person, schedule);
 
 export function ReviewerExplanation({ personnel, schedules, assayName, startDate, durationDays, excludedIds, selectedId }: {
   personnel: Personnel[]; schedules: Schedule[]; assayName: string; startDate: string; durationDays: number; excludedIds: (string | undefined)[]; selectedId: string;

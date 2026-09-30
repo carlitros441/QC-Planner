@@ -13,7 +13,7 @@ import {
   where
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { assayDurationDays, canCompleteReview, eligibleReviewers } from './PersonnelQualifications';
+import { assayDurationDays, canCompleteReview, eligibleReviewers, isAdminReviewOverride } from './PersonnelQualifications';
 import type { AuditEntry, AccessProfile, Personnel, Schedule } from './types';
 
 const requireDb = () => {
@@ -66,7 +66,7 @@ export async function saveDoc<T extends object>(collectionName: string, payload:
       const profile = email ? await getOne<AccessProfile>('accessProfiles', email) : null;
       const reviewer = profile?.personnel_id ? await getOne<Personnel>('personnel', profile.personnel_id) : null;
       if (before?.status !== 'Pending Review' || !canCompleteReview(reviewer, after)) {
-        throw new Error('Only the assigned, qualified Level 2-4 or Supervisor reviewer can complete a pending review.');
+        throw new Error('Only an active Admin or the assigned, qualified Level 2-4 or Supervisor reviewer can complete a pending review.');
       }
     }
     const assignmentChanged = !before || ['reviewer_id', 'assignee_id', 'trainee_id', 'trainee_2_id', 'test_name', 'start_time', 'end_time', 'is_all_day', 'duration_days'].some(field => cleanPayload[field] !== undefined && cleanPayload[field] !== (before as unknown as Record<string, unknown>)[field]);
@@ -100,6 +100,17 @@ export async function getOne<T>(collectionName: string, id: string) {
 
 export async function addAuditEntry(scheduleId: string, action: string, before: unknown, after: unknown, reason: string, user: string) {
   const database = requireDb();
+  const prior = before as Schedule | null;
+  const next = after as Schedule | null;
+  if (prior?.status === 'Pending Review' && (next?.status === 'Completed' || next?.review_status === 'Completed')) {
+    const email = auth?.currentUser?.email;
+    const profile = email ? await getOne<AccessProfile>('accessProfiles', email) : null;
+    const actor = profile?.personnel_id ? await getOne<Personnel>('personnel', profile.personnel_id) : null;
+    if (isAdminReviewOverride(actor, next)) {
+      action = `ADMIN_REVIEW_OVERRIDE_${action}`;
+      reason = `Admin review override by ${user}; assigned reviewer: ${prior.reviewer_id || 'Unassigned'}; main analyst: ${prior.assignee_id}. ${reason}`;
+    }
+  }
   const entry: Omit<AuditEntry, 'id'> = {
     schedule_id: scheduleId,
     action,

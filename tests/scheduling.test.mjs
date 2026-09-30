@@ -96,3 +96,14 @@ test('Only assigned qualified senior reviewer can complete, with no self-review'
   assert.equal(canCompleteReview(reviewer, { ...assay, trainee_2_id: 'b' }), false);
   assert.equal(canCompleteReview(reviewer, { ...assay, assignee_id: 'b' }), false);
 });
+
+test('Active Admin can complete review as main analyst or non-assigned reviewer; other roles cannot self-review', () => {
+  const assay = { assignee_id: 'a', reviewer_id: 'b', test_name: 'T1' };
+  const admin = person('a', 'Admin', { role: 'Admin', analyst_level: '1', assay_qualifications: [] });
+  assert.equal(canCompleteReview(admin, assay), true);
+  assert.equal(canCompleteReview(admin, { ...assay, reviewer_id: 'a' }), true);
+  assert.equal(canCompleteReview(admin, { ...assay, reviewer_id: '' }), true);
+  assert.equal(canCompleteReview({ ...admin, active: false }, assay), false);
+  assert.equal(canCompleteReview(person('a', 'Supervisor', { role: 'Supervisor' }), assay), false);
+  assert.equal(canCompleteReview(person('a', 'Manager', { role: 'Manager', analyst_level: '4' }), assay), false);
+});

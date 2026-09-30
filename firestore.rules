@@ -89,9 +89,11 @@ service cloud.firestore {
       return !(completing || reviewRecorded) || (
         activeAccess()
         && before.status == 'Pending Review'
-        && before.reviewer_id == after.reviewer_id
-        && accessProfile().personnel_id == after.reviewer_id
-        && eligibleReviewer(after)
+        && before.get('reviewer_id', '') == after.get('reviewer_id', '')
+        && (hasRole(['Admin']) || (
+          accessProfile().personnel_id == after.reviewer_id
+          && eligibleReviewer(after)
+        ))
       );
     }
 
