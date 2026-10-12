@@ -121,7 +121,7 @@ QC Planner supports two safe email paths:
 1. **Draft generation:** Click `Draft` on a schedule to download an `.ics` calendar invite file.
 2. **Mail queue:** Click `Invite` to create a `mailRequests` document with `status: pending`.
 
-The mail queue can be processed by the Google Apps Script worker from the previous project, Firebase Cloud Functions if you upgrade to Blaze, or another secure server-side worker. Browser code does not store SMTP passwords.
+The mail queue can be processed by the [Google Apps Script worker](https://github.com/carlitros441/qc-scheduler/blob/master/google-apps-script/Code.gs) from the previous project, Firebase Cloud Functions if you upgrade to Blaze, or another secure server-side worker. Browser code does not store SMTP passwords. Assay invite emails and ICS attendees are limited to the performing main analyst's primary email (the first comma/semicolon-delimited address). Reviewers and trainees remain listed in assay details but are not copied or invited. This policy applies to initial and updated invites; weekly Stability Admin digests are unchanged. Update the active Apps Script project's Code.gs to apply worker changes; GitHub Pages deployment alone does not update Apps Script.
 
 The same Google Apps Script worker can also run `sendWeeklyStabilityReminder` every Monday at 8 AM. Create an active Personnel record named `Stability Admin` with the email address that should receive the weekly stability digest. The digest includes incomplete QC Stability schedule tests within the next 30 days as high priority and within the next 90 days as upcoming low priority.
 
